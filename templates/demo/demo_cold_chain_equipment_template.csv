@@ -1,0 +1,8 @@
+ID,Facility ID,Facility Name,Equipment Type,Brand,Model,Serial Number,Catalog Number,Capacity (L),Net Storage Capacity (L),Power Source,Condition,Manufacture Year,Installation Date,Last Service Date
+,101,"Central Health Centre",solar_direct_drive_refrigerator,"Dulas Arctiko","PURE 50","SN-ADD-001290","E003/042",55.00,45.00,solar,functional,2023,2023-08-15,2026-05-10
+,101,"Central Health Centre",icm,"Haier","HBC-80","SN-ADD-001291","E003/014",80.00,68.00,electric,functional,2021,2021-11-20,2026-04-18
+,101,"Central Health Centre",freezer,"Vestfrost","MF 314","SN-ADD-001292","E003/023",281.00,230.00,electric,functional,2020,2021-02-14,2026-05-22
+,101,"Central Health Centre",cold_box,"AOV","AOV-CB-25","SN-ADD-001293","E004/008",24.00,20.00,none,functional,2022,2022-03-10,2026-04-01
+,101,"Central Health Centre",vaccine_carrier,"Blowings","VC-2.6L","SN-ADD-001294","E004/020",2.60,2.20,none,functional,2023,2023-05-12,2026-05-01
+,101,"Central Health Centre",vaccine_carrier,"Blowings","VC-2.6L","SN-ADD-001295","E004/020",2.60,2.20,none,functional,2023,2023-05-12,2026-05-01
+,101,"Central Health Centre",solar_direct_drive_refrigerator,"B Medical Systems","TCW40SDD","SN-ADD-001296","E003/038",43.50,36.00,solar,functional,2024,2024-01-20,2026-06-05

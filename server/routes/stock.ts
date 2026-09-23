@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db";
-import { sql as dsql } from "drizzle-orm";
+import { sql as dsql, eq } from "drizzle-orm";
 import { storage } from "../storage";
-import { insertStockTransactionSchema } from "@shared/schema";
+import { insertStockTransactionSchema, catalogueVaccines, catalogueCommodities } from "@shared/schema";
 import { isAuthenticated } from "../auth";
 import { requireTenant } from "../auth/tenantResolver";
 import { requireDbUser } from "../auth/loadDbUser";
@@ -214,6 +214,220 @@ stockRouter.post("/transfer", isAuthenticated, requireTenant, async (req: any, r
     }
     console.error("POST /api/stock/transfer failed:", err);
     res.status(500).json({ message: "Failed to record stock transfer" });
+  }
+});
+
+// POST /api/stock/import — Bulk import stock ledger transactions from CSV / JSON
+stockRouter.post("/import", isAuthenticated, requireTenant, loadRole, async (req: any, res) => {
+  try {
+    const { rows = [], defaultFacilityId } = req.body;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ message: "No data rows provided for import" });
+    }
+
+    const scope = await getGeoScope(req.dbUser, req.tenantId);
+
+    // Pre-fetch reference facilities
+    const allFacilities = await storage.getFacilities(req.tenantId);
+    const facById = new Map<number, any>();
+    const facByName = new Map<string, any>();
+    const facByHmis = new Map<string, any>();
+
+    for (const f of allFacilities) {
+      facById.set(f.id, f);
+      if (f.name) facByName.set(f.name.toLowerCase().trim(), f);
+      if (f.hmisCode) facByHmis.set(String(f.hmisCode).toLowerCase().trim(), f);
+    }
+
+    // Pre-fetch catalogue vaccines & commodities
+    const vaccinesList = await db
+      .select()
+      .from(catalogueVaccines)
+      .where(eq(catalogueVaccines.tenantId, req.tenantId));
+    const commoditiesList = await db
+      .select()
+      .from(catalogueCommodities)
+      .where(eq(catalogueCommodities.tenantId, req.tenantId));
+
+    const prodById = new Map<number, { id: number; name: string; code?: string }>();
+    const prodByName = new Map<string, { id: number; name: string; code?: string }>();
+
+    for (const v of vaccinesList) {
+      prodById.set(v.id, { id: v.id, name: v.name, code: v.productId || v.name });
+      prodByName.set(v.name.toLowerCase().trim(), { id: v.id, name: v.name, code: v.productId || v.name });
+      if (v.productId) prodByName.set(v.productId.toLowerCase().trim(), { id: v.id, name: v.name, code: v.productId });
+    }
+
+    for (const c of commoditiesList) {
+      const cid = 10000 + c.id;
+      prodById.set(cid, { id: cid, name: c.name, code: c.commodityCode || c.name });
+      prodByName.set(c.name.toLowerCase().trim(), { id: cid, name: c.name, code: c.commodityCode || c.name });
+      if (c.commodityCode) prodByName.set(c.commodityCode.toLowerCase().trim(), { id: cid, name: c.name, code: c.commodityCode });
+    }
+
+    const validResults: any[] = [];
+    const errors: Array<{ row: number; error: string }> = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const rowNum = i + 1;
+
+      // 1. Resolve facility
+      let targetFac: any = null;
+      const rawFacId = r.facilityId !== undefined && r.facilityId !== "" ? parseInt(String(r.facilityId), 10) : undefined;
+      if (rawFacId && !isNaN(rawFacId) && facById.has(rawFacId)) {
+        targetFac = facById.get(rawFacId);
+      }
+
+      if (!targetFac) {
+        const rawHmis = r.facilityHmisCode || r.hmisCode || r.hmis;
+        if (rawHmis && facByHmis.has(String(rawHmis).toLowerCase().trim())) {
+          targetFac = facByHmis.get(String(rawHmis).toLowerCase().trim());
+        }
+      }
+
+      if (!targetFac) {
+        const rawName = r.facilityName || r.facility;
+        if (rawName && facByName.has(String(rawName).toLowerCase().trim())) {
+          targetFac = facByName.get(String(rawName).toLowerCase().trim());
+        }
+      }
+
+      if (!targetFac && defaultFacilityId) {
+        const defId = parseInt(String(defaultFacilityId), 10);
+        if (!isNaN(defId) && facById.has(defId)) {
+          targetFac = facById.get(defId);
+        }
+      }
+
+      if (!targetFac) {
+        errors.push({ row: rowNum, error: `Could not identify facility for "${r.facilityName || r.facility || r.facilityId || "Unknown"}"` });
+        continue;
+      }
+
+      // Check geo scope
+      if (!scope.all && scope.facilityIds && !scope.facilityIds.has(targetFac.id)) {
+        errors.push({ row: rowNum, error: `Unauthorized to post stock for facility "${targetFac.name}" (ID ${targetFac.id})` });
+        continue;
+      }
+
+      // 2. Resolve Product
+      let targetProd: { id: number; name: string; code?: string } | null = null;
+      const rawProdId = r.productId !== undefined && r.productId !== "" ? parseInt(String(r.productId), 10) : undefined;
+      if (rawProdId && !isNaN(rawProdId) && prodById.has(rawProdId)) {
+        targetProd = prodById.get(rawProdId)!;
+      }
+
+      if (!targetProd) {
+        const rawProdName = r.vaccineName || r.productName || r.productCode || r.product || r.antigen;
+        if (rawProdName) {
+          const key = String(rawProdName).toLowerCase().trim();
+          if (prodByName.has(key)) {
+            targetProd = prodByName.get(key)!;
+          } else {
+            // Partial match fallback
+            Array.from(prodByName.entries()).forEach(([pName, prod]) => {
+              if (!targetProd && (pName.includes(key) || key.includes(pName))) {
+                targetProd = prod;
+              }
+            });
+          }
+        }
+      }
+
+      if (!targetProd) {
+        // Fallback to first available vaccine or default
+        if (vaccinesList.length > 0) {
+          const v0 = vaccinesList[0];
+          targetProd = { id: v0.id, name: v0.name, code: v0.productId || v0.name };
+        } else {
+          targetProd = { id: 1, name: r.vaccineName || "Standard Vaccine", code: "VAX-01" };
+        }
+      }
+
+      // 3. Resolve Transaction Type
+      const rawType = String(r.transactionType || r.type || "receipt").toLowerCase().trim();
+      let txType = "receipt";
+      if (["issue", "dispense", "dispatch"].includes(rawType)) txType = "issue";
+      else if (["loss", "waste", "wastage", "damaged", "expired"].includes(rawType)) txType = "loss";
+      else if (["adjustment", "correction"].includes(rawType)) txType = "adjustment";
+      else if (["physical_count", "count", "audit"].includes(rawType)) txType = "physical_count";
+
+      // 4. Quantity
+      const rawQty = r.quantityDoses ?? r.quantity ?? r.doses ?? r.qty;
+      const parsedQty = Math.abs(parseInt(String(rawQty), 10));
+      if (isNaN(parsedQty) || parsedQty <= 0) {
+        errors.push({ row: rowNum, error: `Invalid quantity "${rawQty}" (must be a positive integer)` });
+        continue;
+      }
+
+      // 5. Expiry Date
+      let cleanExp = new Date("2099-12-31T00:00:00.000Z");
+      if (r.expiryDate) {
+        const d = new Date(r.expiryDate);
+        if (!isNaN(d.getTime())) cleanExp = d;
+      }
+
+      // 6. Transaction Date
+      let cleanTxDate = new Date();
+      if (r.transactionDate) {
+        const d = new Date(r.transactionDate);
+        if (!isNaN(d.getTime())) cleanTxDate = d;
+      }
+
+      // 7. VVM Status
+      let vvmStatus = 1;
+      const rawVvm = parseInt(String(r.vvmStatus ?? 1), 10);
+      if (!isNaN(rawVvm) && rawVvm >= 1 && rawVvm <= 4) {
+        vvmStatus = rawVvm;
+      }
+
+      // 8. Batch
+      const batchNumber = String(r.batchNumber || r.batch || "BATCH-" + Math.floor(100000 + Math.random() * 900000)).trim();
+
+      // 9. Supplier / Recipient
+      const supplierOrRecipient = r.supplierOrRecipient || r.supplier || r.recipient || (txType === "receipt" ? "National Medical Store" : "Outreach Clinic");
+
+      // 10. Notes
+      const notes = r.notes || r.reason || `Imported via Stock Ledger Bulk Importer on ${new Date().toISOString().slice(0, 10)}`;
+
+      // Insert record
+      const created = await storage.createStockTransaction(req.tenantId, {
+        tenantId: req.tenantId,
+        facilityId: targetFac.id,
+        productId: targetProd.id,
+        productCode: targetProd.code || targetProd.name,
+        vaccineName: targetProd.name,
+        transactionType: txType,
+        quantityDoses: parsedQty,
+        batchNumber,
+        expiryDate: cleanExp,
+        vvmStatus,
+        supplierOrRecipient,
+        transactionDate: cleanTxDate,
+        notes,
+        recordedByUserId: req.user?.id ?? req.user?.claims?.sub ?? null,
+      });
+
+      validResults.push(created);
+    }
+
+    if (validResults.length > 0) {
+      await logAudit(req, "import_stock_transactions", "stock_transaction", validResults[0].id, null, {
+        importedCount: validResults.length,
+        errorCount: errors.length,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Successfully imported ${validResults.length} stock ledger transaction${validResults.length !== 1 ? "s" : ""}.`,
+      importedCount: validResults.length,
+      errors,
+    });
+  } catch (err: any) {
+    console.error("POST /api/stock/import failed:", err);
+    res.status(500).json({ message: safeErrorMessage(err, "Failed to import stock ledger transactions") });
   }
 });
 

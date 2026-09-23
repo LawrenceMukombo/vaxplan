@@ -1,0 +1,13 @@
+Facility Name,Facility ID,Facility HMIS,Vaccine / Commodity Name,Product Code,Transaction Type,Quantity (Doses),Batch Number,Expiry Date,VVM Status,Supplier / Recipient,Transaction Date,Notes
+Central Health Centre,101,HMIS-101,BCG,BCG,receipt,500,BCG-2026-08A,2027-12-31,1,National Medical Store,2026-09-01,Routine monthly resupply
+Central Health Centre,101,HMIS-101,bOPV,bOPV,receipt,800,OPV-9941B,2027-10-15,1,National Medical Store,2026-09-01,Routine monthly resupply
+Central Health Centre,101,HMIS-101,Penta (DTP-HepB-Hib),PENTA,receipt,1200,PEN-4022X,2028-03-31,1,National Medical Store,2026-09-01,Routine monthly resupply
+Central Health Centre,101,HMIS-101,Penta (DTP-HepB-Hib),PENTA,issue,150,PEN-4022X,2028-03-31,1,Outreach Team - East Zone,2026-09-05,Weekly mobile outreach session
+Central Health Centre,101,HMIS-101,Measles-Rubella (MR),MR,receipt,600,MR-7731C,2027-11-20,1,National Medical Store,2026-09-01,Routine monthly resupply
+Central Health Centre,101,HMIS-101,Measles-Rubella (MR),MR,loss,10,MR-7731C,2027-11-20,3,Health Facility Cold Room,2026-09-12,VVM stage 3 heat exposure during transport
+Central Health Centre,101,HMIS-101,PCV-13,PCV13,receipt,900,PCV-1188D,2028-01-31,1,National Medical Store,2026-09-01,Routine monthly resupply
+Central Health Centre,101,HMIS-101,Rotavirus,ROTA,receipt,700,ROT-5521E,2027-09-30,1,National Medical Store,2026-09-01,Routine monthly resupply
+Central Health Centre,101,HMIS-101,AD Syringe 0.5ml,SYR-05,receipt,2500,SYR-2026-01,2029-12-31,1,District Vaccine Store,2026-09-01,Consumables routine allocation
+Central Health Centre,101,HMIS-101,Safety Box 5L,BOX-5L,receipt,100,BOX-2026-A,2030-12-31,1,District Vaccine Store,2026-09-01,Biohazard sharps containers
+Central Health Centre,101,HMIS-101,bOPV,bOPV,issue,200,OPV-9941B,2027-10-15,1,Fixed Post Team 1,2026-09-08,Fixed post daily immunization session
+Central Health Centre,101,HMIS-101,Rotavirus,ROTA,issue,120,ROT-5521E,2027-09-30,1,Outreach Team - Riverine,2026-09-10,Targeted hard-to-reach outreach

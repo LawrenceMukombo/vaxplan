@@ -1,0 +1,11 @@
+name,facilityHmisCode,gender,phone,nrc,age,educationLevel,trainingReceived,roleDescription,yearsOfService,siaRole,employmentStatus
+Jane Banda,HMIS-101,female,+260971234567,112233/44/1,32,Secondary,Integrated Community Case Management & Zero-Dose Tracing,Community Health Volunteer - Zone A,4,mobilizer,Active - In-service
+Peter Mutale,HMIS-101,male,+260977654321,223344/55/1,41,Secondary,Social Mobilization & Community Event-Based Surveillance,Community Health Volunteer - Zone B,6,mobilizer,Active - In-service
+Grace Tembo,HMIS-101,female,+260965112233,334455/66/1,28,Certificate,Defaulter Tracking & Caregiver Counseling,Community Health Worker - Outreach Logistics,3,recorder,Active - In-service
+John Lungu,HMIS-101,male,+260950334455,445566/77/1,36,Secondary,Cold Box Handling & Hard-to-Reach Settlement Access,Community Health Volunteer - Hard-to-Reach,5,mobilizer,Active - In-service
+Mwape Chanda,HMIS-101,female,+260978998877,556677/88/1,30,Secondary,Routine Immunization Demand Generation & Home Visits,Community Health Volunteer - Zone C,4,mobilizer,Active - In-service
+Kelvin Mwanza,HMIS-101,male,+260966443322,667788/99/1,45,Certificate,Microplanning Verification & Household Census Mapping,Community Health Worker - Outreach Lead,8,supervisor,Active - In-service
+Esther Phiri,HMIS-101,female,+260973221100,778899/00/1,26,Secondary,Caregiver Engagement & AEFI Notification,Community Health Volunteer - Zone D,2,mobilizer,Active - In-service
+Emmanuel Bwalya,HMIS-101,male,+260955887766,889900/11/1,39,Secondary,SIA Campaign Tallying & Outreach Security Lead,Community Health Volunteer - Peri-urban,7,vaccinator,Active - In-service
+Charity Musonda,HMIS-101,female,+260979445566,990011/22/1,34,Certificate,Infant Growth Monitoring & Vaccination Tracking,Community Health Volunteer - Central,5,recorder,Active - In-service
+Joseph Sakala,HMIS-101,male,+260968113355,101112/33/1,43,Secondary,Community Dialogue Facilitation & Religious Leader Engagement,Community Health Volunteer - Zone E,6,mobilizer,Active - In-service

@@ -1,0 +1,17 @@
+# gender: female | male | other
+# role: vaccinator | recorder | supervisor | facility_in_charge | nurse | midwife | chw | driver | cold_chain_officer
+# campaign_role: vaccinator | mobilizer | volunteer | supervisor | recorder | logistics
+# education_level: primary | secondary | certificate | bachelors | masters | phd
+# training_status: trained | not_trained | refresher_needed | in_training
+# is_active: Yes | No (default Yes)
+# is_volunteer: Yes | No (default No)
+# Replace facility_name with your target health facility name
+full_name,employee_id,nrc,gender,role,campaign_role,position,contact_phone,education_level,training_status,years_experience,years_at_facility,residence_village,is_active,is_volunteer,facility_name,district_name,province_name
+Dr. Mwansa Chileshe,EMP-1001,114422/11/1,male,facility_in_charge,supervisor,Medical Officer In-Charge,+260971000111,bachelors,trained,8,4,Central Quarter,Yes,No,Central Health Centre,Solwezi,North-Western
+Mary Phiri,EMP-1002,225533/22/1,female,nurse,vaccinator,Registered Nurse - Cold Chain Lead,+260972000222,certificate,trained,6,3,Hospital Hill,Yes,No,Central Health Centre,Solwezi,North-Western
+Patrick Banda,EMP-1003,336644/33/1,male,cold_chain_officer,logistics,Environmental Health Technologist,+260973000333,certificate,trained,5,2,Town Centre,Yes,No,Central Health Centre,Solwezi,North-Western
+Faith Kanyemba,EMP-1004,447755/44/1,female,midwife,vaccinator,Certified Midwife - Maternal Child Health,+260974000444,certificate,trained,7,5,Hillview,Yes,No,Central Health Centre,Solwezi,North-Western
+David Zulu,EMP-1005,558866/55/1,male,recorder,recorder,Health Informatics Officer,+260975000555,bachelors,trained,4,2,Airport View,Yes,No,Central Health Centre,Solwezi,North-Western
+Beatrice Mwila,EMP-1006,669977/66/1,female,vaccinator,vaccinator,Public Health Nurse,+260976000666,certificate,trained,3,1,Market Area,Yes,No,Central Health Centre,Solwezi,North-Western
+Lameck Musonda,EMP-1007,770088/77/1,male,driver,logistics,Ambulance & Mobile Outreach Driver,+260977000777,secondary,trained,10,6,Railway Compound,Yes,No,Central Health Centre,Solwezi,North-Western
+Prudence Sikazwe,EMP-1008,881199/88/1,female,chw,mobilizer,Community Health Coordinator,+260978000888,secondary,trained,5,3,Riverside,Yes,Yes,Central Health Centre,Solwezi,North-Western

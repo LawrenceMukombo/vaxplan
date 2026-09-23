@@ -61,10 +61,12 @@ import {
   Filter,
   Eye,
   Download,
+  Upload,
   FileSpreadsheet,
   FileJson,
   Snowflake,
 } from "lucide-react";
+import * as XLSX from "@e965/xlsx";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -1347,6 +1349,147 @@ export default function StockLedger() {
     saveReportMutation.mutate(payload);
   };
 
+  const [isImportingStock, setIsImportingStock] = useState(false);
+
+  const downloadStockLedgerTemplate = () => {
+    const selectedFac = (facilities as any[])?.find((f) => f.id === selectedFacilityId);
+    const facName = selectedFac?.name || "Central Health Centre";
+    const facId = selectedFac?.id || 101;
+    const hmis = selectedFac?.hmisCode || "HMIS-101";
+
+    const headers = [
+      "Facility Name",
+      "Facility ID",
+      "Facility HMIS",
+      "Vaccine / Commodity Name",
+      "Product Code",
+      "Transaction Type",
+      "Quantity (Doses)",
+      "Batch Number",
+      "Expiry Date",
+      "VVM Status",
+      "Supplier / Recipient",
+      "Transaction Date",
+      "Notes"
+    ];
+
+    const sampleRows = [
+      `"${facName}",${facId},"${hmis}","BCG","BCG","receipt",500,"BCG-2026-08A","2027-12-31",1,"National Medical Store","2026-09-01","Routine monthly resupply"`,
+      `"${facName}",${facId},"${hmis}","bOPV","bOPV","receipt",800,"OPV-9941B","2027-10-15",1,"National Medical Store","2026-09-01","Routine monthly resupply"`,
+      `"${facName}",${facId},"${hmis}","Penta (DTP-HepB-Hib)","PENTA","receipt",1200,"PEN-4022X","2028-03-31",1,"National Medical Store","2026-09-01","Routine monthly resupply"`,
+      `"${facName}",${facId},"${hmis}","Penta (DTP-HepB-Hib)","PENTA","issue",150,"PEN-4022X","2028-03-31",1,"Outreach Team - East Zone","2026-09-05","Weekly mobile session"`,
+      `"${facName}",${facId},"${hmis}","Measles-Rubella (MR)","MR","receipt",600,"MR-7731C","2027-11-20",1,"National Medical Store","2026-09-01","Routine monthly resupply"`,
+      `"${facName}",${facId},"${hmis}","Measles-Rubella (MR)","MR","loss",10,"MR-7731C","2027-11-20",3,"Health Facility Cold Room","2026-09-12","VVM stage 3 heat exposure"`,
+      `"${facName}",${facId},"${hmis}","PCV-13","PCV13","receipt",900,"PCV-1188D","2028-01-31",1,"National Medical Store","2026-09-01","Routine monthly resupply"`,
+      `"${facName}",${facId},"${hmis}","Rotavirus","ROTA","receipt",700,"ROT-5521E","2027-09-30",1,"National Medical Store","2026-09-01","Routine monthly resupply"`,
+      `"${facName}",${facId},"${hmis}","AD Syringe 0.5ml","SYR-05","receipt",2500,"SYR-2026-01","2029-12-31",1,"District Vaccine Store","2026-09-01","Consumables batch"`,
+      `"${facName}",${facId},"${hmis}","Safety Box 5L","BOX-5L","receipt",100,"BOX-2026-A","2030-12-31",1,"District Vaccine Store","2026-09-01","Waste management boxes"`
+    ];
+
+    const csvContent = "\uFEFF" + [headers.join(","), ...sampleRows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `stock_ledger_template_${facName.replace(/[^a-zA-Z0-9]/g, "_")}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast({
+      title: "Stock Ledger Template Downloaded",
+      description: "Fill in the template or edit facility details, then click Import Stock Ledger to upload."
+    });
+  };
+
+  const handleStockImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImportingStock(true);
+    const fileName = file.name.toLowerCase();
+    const reader = new FileReader();
+
+    const processRows = async (rawRows: any[]) => {
+      try {
+        if (!rawRows || rawRows.length === 0) {
+          throw new Error("No records found in the uploaded file.");
+        }
+
+        const normalizedRows = rawRows.map((r: any) => ({
+          facilityName: r["Facility Name"] || r["facility_name"] || r.facilityName || r.facility || "",
+          facilityId: r["Facility ID"] || r["facility_id"] || r.facilityId || undefined,
+          facilityHmisCode: r["Facility HMIS"] || r["facility_hmis"] || r["hmis_code"] || r.hmisCode || "",
+          vaccineName: r["Vaccine / Commodity Name"] || r["Vaccine Name"] || r["vaccine_name"] || r.vaccineName || r.productName || r.product || "",
+          productCode: r["Product Code"] || r["product_code"] || r.productCode || "",
+          transactionType: r["Transaction Type"] || r["transaction_type"] || r.transactionType || r.type || "receipt",
+          quantityDoses: r["Quantity (Doses)"] || r["Quantity"] || r["quantity_doses"] || r.quantityDoses || r.doses || r.quantity || 0,
+          batchNumber: r["Batch Number"] || r["batch_number"] || r.batchNumber || r.batch || "",
+          expiryDate: r["Expiry Date"] || r["expiry_date"] || r.expiryDate || "",
+          vvmStatus: r["VVM Status"] || r["vvm_status"] || r.vvmStatus || 1,
+          supplierOrRecipient: r["Supplier / Recipient"] || r["supplier_or_recipient"] || r.supplierOrRecipient || r.supplier || r.recipient || "",
+          transactionDate: r["Transaction Date"] || r["transaction_date"] || r.transactionDate || "",
+          notes: r["Notes"] || r["notes"] || r.notes || r.reason || "",
+        }));
+
+        const res = await apiRequest<any>("POST", "/api/stock/import", {
+          rows: normalizedRows,
+          defaultFacilityId: selectedFacilityId || undefined,
+        });
+
+        queryClient.invalidateQueries({ queryKey: ["/api/stock/ledger"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/stock/predictive-forecast"] });
+
+        toast({
+          title: "Stock Ledger Import Complete",
+          description: res.message || `Successfully imported ${res.importedCount || normalizedRows.length} transactions.`,
+        });
+
+        if (res.errors && res.errors.length > 0) {
+          console.warn("Stock import row warnings:", res.errors);
+        }
+      } catch (err: any) {
+        toast({
+          title: "Stock Import Failed",
+          description: err.message || "Failed to process stock ledger file.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsImportingStock(false);
+        e.target.value = "";
+      }
+    };
+
+    if (fileName.endsWith(".json")) {
+      reader.onload = (evt) => {
+        try {
+          const json = JSON.parse(evt.target?.result as string);
+          const rows = Array.isArray(json) ? json : [json];
+          processRows(rows);
+        } catch (err: any) {
+          setIsImportingStock(false);
+          toast({ title: "Invalid JSON File", description: err.message, variant: "destructive" });
+        }
+      };
+      reader.readAsText(file);
+    } else {
+      reader.onload = (evt) => {
+        try {
+          const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: "array" });
+          const firstSheet = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheet];
+          const rawRows = XLSX.utils.sheet_to_json(worksheet);
+          processRows(rawRows);
+        } catch (err: any) {
+          setIsImportingStock(false);
+          toast({ title: "File Read Error", description: "Failed to parse CSV or Excel file.", variant: "destructive" });
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
       {/* Top Header Section */}
@@ -1360,7 +1503,35 @@ export default function StockLedger() {
           </div>
 
           {/* Action buttons */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              variant="outline"
+              onClick={downloadStockLedgerTemplate}
+              className="gap-1.5"
+              data-testid="button-download-stock-template"
+            >
+              <Download className="h-4 w-4" />
+              <span>Download Template</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              disabled={isImportingStock}
+              onClick={() => document.getElementById("csv-stock-import")?.click()}
+              className="gap-1.5"
+              data-testid="button-import-stock-ledger"
+            >
+              <Upload className="h-4 w-4" />
+              <span>{isImportingStock ? "Importing..." : "Import Stock Ledger"}</span>
+            </Button>
+            <input
+              id="csv-stock-import"
+              type="file"
+              accept=".csv,.xlsx,.xls,.json"
+              className="hidden"
+              onChange={handleStockImportFile}
+            />
+
             <Button
               variant="outline"
               onClick={() => {
