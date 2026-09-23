@@ -127,14 +127,15 @@ export async function sendSms(options: SendSmsOptions): Promise<{ success: boole
       }
 
       const messageId = first.messageId || `at-${Date.now()}`;
-      console.log(`[Africa's Talking] SMS sent to ${to}: messageId=${messageId}, status=${first.status}`);
+      const maskedTo = to.replace(/(\+?\d{1,4})\d{3,}(\d{2,4})$/, "$1****$2");
+      console.log(`[Africa's Talking] SMS sent to ${maskedTo}: messageId=${messageId}, status=${first.status}`);
       return { success: true, messageId };
     }
 
     if (provider === 'android_sms') {
       const serverUrl = config?.serverUrl || config?.accountSid || process.env.ANDROID_SMS_GATEWAY_URL;
       const username  = config?.username  || config?.authToken   || process.env.ANDROID_SMS_GATEWAY_USER || 'user';
-      const password  = config?.password  || config?.senderNumber || process.env.ANDROID_SMS_GATEWAY_PASS || '';
+      const password  = config?.password  || process.env.ANDROID_SMS_GATEWAY_PASS || '';
       return await sendAndroidSms(to, message, { serverUrl, username, password });
     }
     

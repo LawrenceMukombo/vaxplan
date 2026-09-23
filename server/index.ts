@@ -101,7 +101,7 @@ const bulkBodyParser = express.json({
     req.rawBody = buf;
   },
 });
-app.use(["/api/sync/push", "/api/clients/import", "/api/resources", "/api/geotiff"], bulkBodyParser);
+app.use(["/api/sync/push", "/api/clients/import", "/api/resources/geotiff", "/api/geotiff"], bulkBodyParser);
 
 app.use(
   express.json({

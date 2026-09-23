@@ -69,6 +69,12 @@ export function sanitizeAndroidSmsPhone(phone: string): string {
 export async function getAndroidSmsStatus(
   config?: AndroidSmsConfig
 ): Promise<AndroidSmsStatus> {
+  if (!config?.serverUrl && !process.env.ANDROID_SMS_GATEWAY_URL) {
+    return {
+      online: false,
+      message: "Android SMS Gateway is not configured.",
+    };
+  }
   const { serverUrl, username, password } = resolveConfig(config);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -131,6 +137,9 @@ export async function sendAndroidSms(
   message: string,
   config?: AndroidSmsConfig
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  if (!config?.serverUrl && !process.env.ANDROID_SMS_GATEWAY_URL) {
+    return { success: false, error: "Android SMS Gateway is not configured. Please specify a server URL." };
+  }
   const { serverUrl, username, password } = resolveConfig(config);
   const phone = sanitizeAndroidSmsPhone(to);
 
@@ -179,7 +188,8 @@ export async function sendAndroidSms(
     // The API returns: { "id": "...", "state": "Pending", ... }
     const messageId = data?.id || data?.messageId || `android-sms-${Date.now()}`;
 
-    console.log(`[Android SMS] Sent to ${phone} via ${serverUrl}: id=${messageId}`);
+    const maskedPhone = phone.replace(/(\+?\d{1,4})\d{3,}(\d{2,4})$/, "$1****$2");
+    console.log(`[Android SMS] Sent to ${maskedPhone} via ${serverUrl}: id=${messageId}`);
     return { success: true, messageId: String(messageId) };
   } catch (err: any) {
     clearTimeout(timeoutId);

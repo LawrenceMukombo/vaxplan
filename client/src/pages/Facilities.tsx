@@ -9,7 +9,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { CARTO_POSITRON_ATTRIBUTION } from "@/data/dataSources";
 import { usePersistedBasemap, BasemapTileLayer } from "@/components/map/BasemapToggle";
-import { createFacilityCircleIcon, createGapVillageIcon, createOutlinePinIcon, createVillageWithChvsIcon } from "@/lib/mapIcons";
+import { createFacilityCircleIcon, createFilledPinIcon, createGapVillageIcon, createOutlinePinIcon, createVillageWithChvsIcon } from "@/lib/mapIcons";
 import {
   usePopulationOverlay,
   PopulationWmsLayer,
@@ -37,6 +37,9 @@ const OFFLINE_FACILITY_ICON =
 
 const OFFLINE_VILLAGE_ICON =
   typeof window !== "undefined" ? createOutlinePinIcon("green") : (null as any);
+
+const SELECTED_VILLAGE_ICON =
+  typeof window !== "undefined" ? createFilledPinIcon("amber") : (null as any);
 import {
   Dialog,
   DialogContent,
@@ -409,12 +412,22 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
   const { data: editingFacilityRoutes } = useQuery<any[]>({
     queryKey: ["/api/facilities", editingFacility?.id, "community-routes"],
     enabled: !!editingFacility?.id,
+    queryFn: async () => {
+      const response = await fetch(`/api/facilities/${editingFacility!.id}/community-routes`, { credentials: "include" });
+      if (!response.ok) throw new Error("Failed to load community routes");
+      return response.json();
+    },
   });
 
   // Fetch community routes for selected facility (main page panel) - using array queryKey for automatic invalidate matching
   const { data: selectedFacilityRoutes } = useQuery<any[]>({
     queryKey: ["/api/facilities", selectedFacilityId, "community-routes"],
     enabled: !!selectedFacilityId,
+    queryFn: async () => {
+      const response = await fetch(`/api/facilities/${selectedFacilityId}/community-routes`, { credentials: "include" });
+      if (!response.ok) throw new Error("Failed to load community routes");
+      return response.json();
+    },
   });
 
   const selectedCatchmentPoints = useMemo(() => {
@@ -2222,7 +2235,11 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
       header: "Est. Travel Time",
       render: (item: Village) => {
         const route = getCommunityRoute(item.id);
-        if (!route) return <span className="text-muted-foreground text-xs">-</span>;
+        if (!route) {
+          return item.travelTimeMinutes
+            ? <span className="text-xs text-foreground">{item.travelTimeMinutes}m</span>
+            : <span className="text-muted-foreground text-xs">-</span>;
+        }
         return (
           <div className="text-xs space-y-0.5">
             <p className="text-foreground">🚗 {route.drivingTimeMinutes}m drive</p>
@@ -4304,9 +4321,18 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
 
                         {/* Network Routes from Facility to Communities */}
                         {selectedFacilityRoutes && selectedFacilityRoutes.map((route: any) => {
-                          if (route.hasRoadGeometry === false || route.routeSource === "estimate") return null;
-                          if (!route.routeGeometry || route.routeGeometry.length < 2) return null;
-                          const positions = route.routeGeometry.map((pt: number[]) => [pt[1], pt[0]]) as [number, number][];
+                          const facility = facilities?.find(f => Number(f.id) === Number(selectedFacilityId));
+                          const village = facilityCommunities.find(v => Number(v.id) === Number(route.villageId));
+                          const hasRoadGeometry = Array.isArray(route.routeGeometry) && route.routeGeometry.length >= 2;
+                          const positions = hasRoadGeometry
+                            ? route.routeGeometry.map((pt: number[]) => [pt[1], pt[0]]) as [number, number][]
+                            : facility?.latitude != null && facility?.longitude != null && village?.latitude != null && village?.longitude != null
+                              ? [
+                                  [Number(facility.latitude), Number(facility.longitude)],
+                                  [Number(village.latitude), Number(village.longitude)],
+                                ] as [number, number][]
+                              : [];
+                          if (positions.length < 2) return null;
                           
                           let color = "#10b981"; // Easy
                           if (route.accessibilityScore === "Moderate") color = "#f97316"; // orange
@@ -4320,7 +4346,7 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
                                 color: color,
                                 weight: 3.5,
                                 opacity: 0.85,
-                                dashArray: route.isDirectlyAssigned ? undefined : "5 5"
+                                dashArray: hasRoadGeometry ? (route.isDirectlyAssigned ? undefined : "5 5") : "7 7"
                               }}
                             >
                               <Popup>
@@ -4360,7 +4386,12 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
                         {facilityCommunities.map((village) => {
                           if (!village.latitude || !village.longitude) return null;
                           const chvCount = facilityChvs?.filter((chv: any) => chv.villageId === village.id).length || 0;
-                          const currentIcon = chvCount > 0 && typeof window !== "undefined" ? createVillageWithChvsIcon(chvCount) : OFFLINE_VILLAGE_ICON;
+                          const isSelected = Number(selectedCommunityDetails?.id) === Number(village.id);
+                          const currentIcon = isSelected
+                            ? SELECTED_VILLAGE_ICON
+                            : chvCount > 0 && typeof window !== "undefined"
+                              ? createVillageWithChvsIcon(chvCount)
+                              : OFFLINE_VILLAGE_ICON;
                           return (
                             <Marker
                               key={village.id}
@@ -4368,6 +4399,7 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
                               icon={currentIcon}
                               draggable
                               eventHandlers={{
+                                click: () => setSelectedCommunityDetails(village),
                                 dragend: (e) => {
                                   const position = e.target.getLatLng();
                                   updateCommunityMutation.mutate({

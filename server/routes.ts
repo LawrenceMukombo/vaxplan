@@ -1,4 +1,4 @@
-﻿import { approvalEligibility, developmentDaysSchema, isApprovedPlan } from "@shared/microplanPolicy";
+import { approvalEligibility, developmentDaysSchema, isApprovedPlan } from "@shared/microplanPolicy";
 import { buildMicroplanPrintHtml } from "./routes/microplanPrint";
 import { safeErrorMessage } from "./errorUtils";
 import { DenominatorHarmonisationService } from "./services/denominatorHarmonisationService.js";
@@ -657,6 +657,9 @@ export async function getGeoScope(dbUser: any, tenantId: string): Promise<GeoSco
   }
 
   const scope: GeoScope = { all: false, provinceIds, districtIds, facilityIds, communityDistrictIds };
+  if (_geoScopeCache.size >= 5000) {
+    _geoScopeCache.clear();
+  }
   _geoScopeCache.set(cacheKey, { scope, exp: Date.now() + GEO_SCOPE_TTL_MS });
   return scope;
 }
@@ -1203,6 +1206,13 @@ export async function cancelSeededSupervisionVisitsForMicroplan(
   return { deletedIds, cancelledIds };
 }
 
+function maskPhone(phone: string): string {
+  if (!phone) return "";
+  const str = phone.trim();
+  if (str.length <= 4) return "****";
+  return str.replace(/(\+?\d{1,4})\d{3,}(\d{2,4})$/, "$1****$2");
+}
+
 export async function sendMobilizationSmsForSession(tenantId: string, sessionId: number) {
   try {
     const session = await storage.getSessionPlan(tenantId, sessionId);
@@ -1242,7 +1252,7 @@ export async function sendMobilizationSmsForSession(tenantId: string, sessionId:
           to: vil.focalPersonPhone.trim(),
           message
         });
-        console.log(`[Focal Person SMS] Scheduled session alert sent to ${vil.focalPersonPhone} for village ${vil.name}`);
+        console.log(`[Focal Person SMS] Scheduled session alert sent to ${maskPhone(vil.focalPersonPhone)} for village ${vil.name}`);
       }
     }
   } catch (err) {
@@ -1407,9 +1417,9 @@ export async function sendApprovalSmsForMicroplan(tenantId: string, microplanId:
               to: phone,
               message
             });
-            console.log(`[Focal Person SMS] Approved plan alert sent to ${phone} for village ${vil.name}`);
+            console.log(`[Focal Person SMS] Approved plan alert sent to ${maskPhone(phone)} for village ${vil.name}`);
           } catch (smsErr) {
-            console.warn(`[Focal Person SMS] Failed to send SMS to ${phone}:`, smsErr);
+            console.warn(`[Focal Person SMS] Failed to send SMS to ${maskPhone(phone)}:`, smsErr);
           }
 
           // Send WhatsApp
@@ -1418,9 +1428,9 @@ export async function sendApprovalSmsForMicroplan(tenantId: string, microplanId:
               to: phone,
               message
             });
-            console.log(`[Focal Person WhatsApp] Approved plan alert sent to ${phone} for village ${vil.name}`);
+            console.log(`[Focal Person WhatsApp] Approved plan alert sent to ${maskPhone(phone)} for village ${vil.name}`);
           } catch (waErr) {
-            console.warn(`[Focal Person WhatsApp] Failed to send WhatsApp to ${phone}:`, waErr);
+            console.warn(`[Focal Person WhatsApp] Failed to send WhatsApp to ${maskPhone(phone)}:`, waErr);
           }
         }
       }
@@ -3140,7 +3150,6 @@ export async function registerRoutes(
       "image/png": ".png",
       "image/jpeg": ".jpg",
       "image/jpg": ".jpg",
-      "image/svg+xml": ".svg",
       "image/webp": ".webp",
     };
 
@@ -3152,7 +3161,7 @@ export async function registerRoutes(
                                              // the disk and CDN happy.
       fileFilter: (_req, file, cb) => {
         if (ALLOWED_MIME[file.mimetype]) return cb(null, true);
-        cb(new Error("Unsupported logo format. Use PNG, JPG, SVG, or WebP."));
+        cb(new Error("Unsupported logo format. Use PNG, JPG, or WebP."));
       },
     });
 
@@ -3476,8 +3485,7 @@ export async function registerRoutes(
       }),
       limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB max
       fileFilter: (_req, file, cb) => {
-        const ok = /\.(tif|tiff)$/i.test(file.originalname) ||
-          ["image/tiff", "application/octet-stream"].includes(file.mimetype);
+        const ok = /\.(tif|tiff)$/i.test(file.originalname);
         ok ? cb(null, true) : cb(new Error("Only .tif / .tiff files are accepted"));
       },
     });
@@ -3500,6 +3508,22 @@ export async function registerRoutes(
         try {
           if (!req.file) {
             return res.status(400).json({ message: "No file uploaded (field name must be 'file')" });
+          }
+          // Validate TIFF magic bytes
+          try {
+            const fd = _fs2.openSync(req.file.path, "r");
+            const magic = Buffer.alloc(4);
+            _fs2.readSync(fd, magic, 0, 4, 0);
+            _fs2.closeSync(fd);
+            const isTiff = (magic[0] === 0x49 && magic[1] === 0x49 && (magic[2] === 0x2A || magic[2] === 0x2B)) ||
+                           (magic[0] === 0x4D && magic[1] === 0x4D && magic[2] === 0x00 && (magic[3] === 0x2A || magic[3] === 0x2B));
+            if (!isTiff) {
+              try { _fs2.unlinkSync(req.file.path); } catch {}
+              return res.status(400).json({ message: "Uploaded file is not a valid GeoTIFF / TIFF file." });
+            }
+          } catch (magicErr) {
+            try { _fs2.unlinkSync(req.file.path); } catch {}
+            return res.status(400).json({ message: "Failed to read uploaded file header." });
           }
           const rasterPath = req.file.path;
           const sizeMb = (req.file.size / 1024 / 1024).toFixed(1);
@@ -3663,6 +3687,7 @@ export async function registerRoutes(
   app.patch("/api/regions/:id", ...auth, async (req: any, res) => {
     try {
       const entityId = parseInt(req.params.id);
+      if (isNaN(entityId)) return res.status(400).json({ message: "Invalid region ID" });
       const oldRegion = await storage.getRegion(req.tenantId, entityId);
       const region = await storage.updateRegion(req.tenantId, entityId, req.body);
       if (!region) return res.status(404).json({ message: "Region not found" });
@@ -3690,7 +3715,9 @@ export async function registerRoutes(
 
   app.get("/api/llgs/:id", ...auth, async (req: any, res) => {
     try {
-      const llg = await storage.getLlg(req.tenantId, parseInt(req.params.id));
+      const llgId = parseInt(req.params.id);
+      if (isNaN(llgId)) return res.status(400).json({ message: "Invalid LLG ID" });
+      const llg = await storage.getLlg(req.tenantId, llgId);
       if (!llg) return res.status(404).json({ message: "LLG not found" });
       res.json(llg);
     } catch (error) {
@@ -3714,6 +3741,7 @@ export async function registerRoutes(
   app.patch("/api/llgs/:id", ...auth, async (req: any, res) => {
     try {
       const entityId = parseInt(req.params.id);
+      if (isNaN(entityId)) return res.status(400).json({ message: "Invalid LLG ID" });
       const oldLlg = await storage.getLlg(req.tenantId, entityId);
       const llg = await storage.updateLlg(req.tenantId, entityId, req.body);
       if (!llg) return res.status(404).json({ message: "LLG not found" });
@@ -3771,7 +3799,9 @@ export async function registerRoutes(
 
   app.get("/api/provinces/:id", ...auth, async (req: any, res) => {
     try {
-      const province = await storage.getProvince(req.tenantId, parseInt(req.params.id));
+      const provinceId = parseInt(req.params.id);
+      if (isNaN(provinceId)) return res.status(400).json({ message: "Invalid province ID" });
+      const province = await storage.getProvince(req.tenantId, provinceId);
       if (!province) return res.status(404).json({ message: "Province not found" });
       res.json(province);
     } catch (error) {
@@ -3799,6 +3829,7 @@ export async function registerRoutes(
   app.patch("/api/provinces/:id", ...auth, async (req: any, res) => {
     try {
       const entityId = parseInt(req.params.id);
+      if (isNaN(entityId)) return res.status(400).json({ message: "Invalid province ID" });
       const oldProvince = await storage.getProvince(req.tenantId, entityId);
       if (!oldProvince) return res.status(404).json({ message: "Province not found" });
       if (!(await userCanAccessGeo(req.dbUser, req.tenantId, { provinceId: entityId }))) {
@@ -3845,7 +3876,9 @@ export async function registerRoutes(
 
   app.get("/api/districts/:id", ...auth, async (req: any, res) => {
     try {
-      const district = await storage.getDistrict(req.tenantId, parseInt(req.params.id));
+      const districtId = parseInt(req.params.id);
+      if (isNaN(districtId)) return res.status(400).json({ message: "Invalid district ID" });
+      const district = await storage.getDistrict(req.tenantId, districtId);
       if (!district) return res.status(404).json({ message: "District not found" });
       res.json(district);
     } catch (error) {
@@ -3872,6 +3905,7 @@ export async function registerRoutes(
   app.patch("/api/districts/:id", ...auth, async (req: any, res) => {
     try {
       const entityId = parseInt(req.params.id);
+      if (isNaN(entityId)) return res.status(400).json({ message: "Invalid district ID" });
       const oldDistrict = await storage.getDistrict(req.tenantId, entityId);
       if (!oldDistrict) return res.status(404).json({ message: "District not found" });
       if (!(await userCanAccessGeo(req.dbUser, req.tenantId, { districtId: entityId }))) {
@@ -5488,6 +5522,7 @@ export async function registerRoutes(
     try {
       const dbUser = req.dbUser!;
       const entityId = parseInt(req.params.id);
+      if (isNaN(entityId)) return res.status(400).json({ message: "Invalid ID" });
       const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
       if (!oldPop) return res.status(404).json({ message: "Population data not found" });
 
@@ -5539,6 +5574,7 @@ export async function registerRoutes(
     try {
       const dbUser = req.dbUser!;
       const entityId = parseInt(req.params.id);
+      if (isNaN(entityId)) return res.status(400).json({ message: "Invalid ID" });
       const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
       if (!oldPop) return res.status(404).json({ message: "Population data not found" });
 
@@ -5575,6 +5611,7 @@ export async function registerRoutes(
     try {
       const dbUser = req.dbUser!;
       const entityId = parseInt(req.params.id);
+      if (isNaN(entityId)) return res.status(400).json({ message: "Invalid ID" });
       const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
       if (!oldPop) return res.status(404).json({ message: "Population data not found" });
 
@@ -5616,6 +5653,7 @@ export async function registerRoutes(
     try {
       const dbUser = req.dbUser!;
       const entityId = parseInt(req.params.id);
+      if (isNaN(entityId)) return res.status(400).json({ message: "Invalid ID" });
       const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
       if (!oldPop) return res.status(404).json({ message: "Population data not found" });
 
@@ -5665,6 +5703,7 @@ export async function registerRoutes(
     try {
       const dbUser = req.dbUser!;
       const entityId = parseInt(req.params.id);
+      if (isNaN(entityId)) return res.status(400).json({ message: "Invalid ID" });
       const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
       if (!oldPop) return res.status(404).json({ message: "Population data not found" });
 
@@ -5715,6 +5754,7 @@ export async function registerRoutes(
     try {
       const dbUser = req.dbUser!;
       const entityId = parseInt(req.params.id);
+      if (isNaN(entityId)) return res.status(400).json({ message: "Invalid ID" });
       const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
       if (!oldPop) return res.status(404).json({ message: "Population data not found" });
 
@@ -5765,6 +5805,7 @@ export async function registerRoutes(
     try {
       const dbUser = req.dbUser!;
       const entityId = parseInt(req.params.id);
+      if (isNaN(entityId)) return res.status(400).json({ message: "Invalid ID" });
       const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
       if (!oldPop) return res.status(404).json({ message: "Population data not found" });
 
@@ -5815,6 +5856,7 @@ export async function registerRoutes(
     try {
       const dbUser = req.dbUser!;
       const entityId = parseInt(req.params.id);
+      if (isNaN(entityId)) return res.status(400).json({ message: "Invalid ID" });
       const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
       if (!oldPop) return res.status(404).json({ message: "Population data not found" });
 
@@ -7772,12 +7814,16 @@ export async function registerRoutes(
         });
       }
 
-      const facList = scope.all ? "" : (Array.from(scope.facilityIds).join(",") || "0");
-      const distList = scope.all ? "" : (Array.from(scope.districtIds).join(",") || "0");
+      // Integer-validate IDs before joining into raw SQL — defence-in-depth against
+      // future upstream code paths accidentally passing non-integer values.
+      const facIds  = scope.all ? [] : Array.from(scope.facilityIds).filter(Number.isInteger);
+      const distIds = scope.all ? [] : Array.from(scope.districtIds).filter(Number.isInteger);
+      const facList  = facIds.length  ? facIds.join(",")  : "0";
+      const distList = distIds.length ? distIds.join(",") : "0";
 
-      const facCond = scope.all ? dsql`` : dsql`AND id = ANY(ARRAY[${dsql.raw(facList)}]::int[])`;
+      const facCond    = scope.all ? dsql`` : dsql`AND id = ANY(ARRAY[${dsql.raw(facList)}]::int[])`;
       const facRefCond = scope.all ? dsql`` : dsql`AND facility_id = ANY(ARRAY[${dsql.raw(facList)}]::int[])`;
-      const villCond = scope.all ? dsql`` : dsql`AND (assigned_facility_id = ANY(ARRAY[${dsql.raw(facList)}]::int[]) OR district_id = ANY(ARRAY[${dsql.raw(distList)}]::int[]))`;
+      const villCond   = scope.all ? dsql`` : dsql`AND (assigned_facility_id = ANY(ARRAY[${dsql.raw(facList)}]::int[]) OR district_id = ANY(ARRAY[${dsql.raw(distList)}]::int[]))`;
 
       const result = await db.execute(dsql`
         SELECT
@@ -8103,9 +8149,31 @@ export async function registerRoutes(
   // POST /api/custom-layers — upload a new layer (admin only)
   {
     const _multer = (await import("multer")).default;
+    const _path2 = await import("path");
+    const _fs2 = await import("fs");
+
+    // Allowed GIS extensions — reject anything else before it hits RAM.
+    const ALLOWED_LAYER_EXTS = new Set([".geojson", ".json", ".csv", ".zip", ".tif", ".tiff"]);
+
+    try { _fs2.mkdirSync(customLayerUploadDir, { recursive: true }); } catch {}
+
+    // Use disk storage so large GeoTIFF/shapefile uploads never sit entirely in RAM.
+    const layerDiskStorage = _multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, customLayerUploadDir),
+      filename: (_req, file, cb) => {
+        const safe = (file.originalname || "layer").replace(/[^a-zA-Z0-9._-]/g, "_");
+        cb(null, `${Date.now()}-${safe}`);
+      },
+    });
+
     const layerUpload = _multer({
-      storage: _multer.memoryStorage(),
-      limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2GB for large rasters/shapefiles
+      storage: layerDiskStorage,
+      limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB — enough for any real GIS layer
+      fileFilter: (_req, file, cb) => {
+        const ext = _path2.extname(file.originalname || "").toLowerCase();
+        if (ALLOWED_LAYER_EXTS.has(ext)) return cb(null, true);
+        cb(new Error(`Unsupported file type '${ext}'. Allowed: .geojson, .json, .csv, .zip, .tif, .tiff`));
+      },
     });
 
     app.post(
@@ -8148,30 +8216,32 @@ export async function registerRoutes(
           let bbox: number[] | null = null;
 
           if (fname.endsWith(".tif") || fname.endsWith(".tiff")) {
-            // Raster: persist the file, store a path reference.
+            // Raster: file already written to disk by multer diskStorage.
             layerType = "raster";
             format = "geotiff";
-            try { mkdirSync(customLayerUploadDir, { recursive: true }); } catch {}
-            const safeName = `${Date.now()}-${(file.originalname || "layer.tif").replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-            filePath = join(customLayerUploadDir, safeName);
-            writeFileSync(filePath, file.buffer);
+            filePath = file.path; // already persisted — no buffer copy needed
           } else if (fname.endsWith(".geojson") || fname.endsWith(".json")) {
             format = "geojson";
-            const raw = JSON.parse(file.buffer.toString("utf-8"));
+            const rawText = readFileSync(file.path, "utf-8");
+            const raw = JSON.parse(rawText);
             geojson = raw.type === "FeatureCollection"
               ? raw
               : { type: "FeatureCollection", features: raw.type === "Feature" ? [raw] : (Array.isArray(raw) ? raw : []) };
             featureCount = geojson.features?.length ?? 0;
             bbox = calcBBox(geojson) ?? null;
+            try { unlinkSync(file.path); } catch {} // temp file no longer needed
           } else if (fname.endsWith(".csv")) {
             format = "csv";
-            geojson = csvToGeoJSON(file.buffer.toString("utf-8"));
+            const csvText = readFileSync(file.path, "utf-8");
+            geojson = csvToGeoJSON(csvText);
             featureCount = geojson.features.length;
             bbox = calcBBox(geojson) ?? null;
+            try { unlinkSync(file.path); } catch {} // temp file no longer needed
           } else if (fname.endsWith(".zip")) {
             format = "shapefile";
             const shp = (await import("shpjs")).default as any;
-            const parsedShp = await shp(file.buffer);
+            const zipBuf = readFileSync(file.path);
+            const parsedShp = await shp(zipBuf);
             // shpjs returns a FeatureCollection, or an array of them for multi-layer zips.
             if (Array.isArray(parsedShp)) {
               geojson = { type: "FeatureCollection", features: parsedShp.flatMap((fc: any) => fc.features || []) };
@@ -8180,7 +8250,10 @@ export async function registerRoutes(
             }
             featureCount = geojson.features?.length ?? 0;
             bbox = calcBBox(geojson) ?? null;
+            try { unlinkSync(file.path); } catch {} // temp file no longer needed
           } else {
+            // fileFilter already blocks unknown types, but keep this as a safety net.
+            try { unlinkSync(file.path); } catch {}
             return res.status(400).json({
               message: "Unsupported file type. Upload .geojson, .json, .csv, .zip (shapefile), or .tif/.tiff (GeoTIFF).",
             });
@@ -15342,8 +15415,12 @@ export async function registerRoutes(
         let statsRow: Record<string, any> = { totalFacilities: 0, activeFacilities: 0, totalVillages: 0, htrVillages: 0, totalSessions: 0, totalPopulation: 0 };
 
         if (scope.all || scope.facilityIds.size > 0 || scope.districtIds.size > 0 || scope.provinceIds.size > 0) {
-          const facList = scope.all ? "" : (Array.from(scope.facilityIds).join(",") || "0");
-          const distList = scope.all ? "" : (Array.from(scope.districtIds).join(",") || "0");
+          // Integer-validate IDs before joining into raw SQL — defence-in-depth against
+          // future upstream code paths accidentally passing non-integer values.
+          const facIds  = scope.all ? [] : Array.from(scope.facilityIds).filter(Number.isInteger);
+          const distIds = scope.all ? [] : Array.from(scope.districtIds).filter(Number.isInteger);
+          const facList  = facIds.length  ? facIds.join(",")  : "0";
+          const distList = distIds.length ? distIds.join(",") : "0";
 
           const facCond = scope.all ? dsql`` : dsql`AND id = ANY(ARRAY[${dsql.raw(facList)}]::int[])`;
           const facRefCond = scope.all ? dsql`` : dsql`AND facility_id = ANY(ARRAY[${dsql.raw(facList)}]::int[])`;

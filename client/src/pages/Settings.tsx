@@ -1927,11 +1927,11 @@ export default function Settings() {
                 </p>
                 <div className="grid sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <Label htmlFor="brand-logo" className="text-xs">Ministry Logo (PNG/JPG/SVG/WebP, max 2&nbsp;MB)</Label>
+                    <Label htmlFor="brand-logo" className="text-xs">Ministry Logo (PNG/JPG/WebP, max 2&nbsp;MB)</Label>
                     <Input
                       id="brand-logo"
                       type="file"
-                      accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                      accept="image/png,image/jpeg,image/webp"
                       disabled={!isNationalAdmin || brandLogoUploading}
                       data-testid="input-brand-logo"
                       onChange={async (e) => {
