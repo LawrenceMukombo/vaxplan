@@ -1478,7 +1478,11 @@ export function registerCommunityRoutes(app: Express) {
         .limit(1);
 
       res.json({
-        catchmentPolygon: activeGeo?.geometry || row.catchmentPolygon || row.boundary || null,
+        // `boundary` is reference geography imported from administrative/GIS
+        // sources. It can represent an entire municipality (for example,
+        // eThekwini) and must never be presented as a community catchment.
+        // Only an explicitly saved community polygon is valid here.
+        catchmentPolygon: activeGeo?.geometry || row.catchmentPolygon || null,
         griddedPopulation: activeGeo?.populationEstimate || row.griddedPopulation || null,
         polygonColor: row.polygonColor || null,
         populationSourceLabel: activeGeo?.populationSource || row.populationSourceLabel || null,
