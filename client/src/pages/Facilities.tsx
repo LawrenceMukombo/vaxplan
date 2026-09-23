@@ -2004,18 +2004,32 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
       sortable: true,
       render: (item: Facility) => {
         const rollup = getFacilityPopulationRollup(item.id);
+        const assignedCount = getAssignedVillageCount(item.id);
         if (!rollup || rollup.total <= 0) {
-          return <span className="text-muted-foreground">-</span>;
+          return assignedCount > 0 ? (
+            <div className="flex flex-col">
+              <span className="text-muted-foreground">-</span>
+              <span className="text-xs text-amber-600 dark:text-amber-400">
+                0 of {assignedCount} communities reporting
+              </span>
+            </div>
+          ) : <span className="text-muted-foreground">-</span>;
         }
 
-        const label = rollup.communities > 0
-          ? `${rollup.communities} ${rollup.communities === 1 ? "community" : "communities"}`
+        const label = assignedCount > 0
+          ? `${rollup.communities} of ${assignedCount} ${assignedCount === 1 ? "community" : "communities"} reporting`
+          : rollup.communities > 0
+            ? `${rollup.communities} ${rollup.communities === 1 ? "community" : "communities"} reporting`
           : "facility record";
+        const hasPopulationGap = assignedCount > 0 && rollup.communities < assignedCount;
 
         return (
           <div className="flex flex-col">
             <span className="font-semibold">{getFacilityPopulation(item.id)}</span>
-            <span className="text-xs text-muted-foreground">
+            <span
+              className={`text-xs ${hasPopulationGap ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
+              title={hasPopulationGap ? `${assignedCount - rollup.communities} assigned ${assignedCount - rollup.communities === 1 ? "community has" : "communities have"} no population value yet.` : undefined}
+            >
               {label}
               {rollup.worldPopCommunities > 0 ? " · WorldPop" : ""}
             </span>
