@@ -82,6 +82,7 @@ import {
   microplanVersions,
   approvalRequests,
   auditLogs,
+  pageViews,
   insertBudgetItemSchema,
   insertVaccineRequirementSchema,
   insertMobilizationActivitySchema,
@@ -6935,6 +6936,99 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error listing audit logs:", error);
       res.status(500).json({ message: "Failed to list audit logs" });
+    }
+  });
+
+  // Enterprise user activity stream. Combines immutable record audit events
+  // with authenticated navigation/presence events so administrators can review
+  // a user's complete platform footprint from one tenant-scoped timeline.
+  app.get("/api/users/:id/activity", isAuthenticated, requireTenant, loadRole, requireAdmin, async (req: any, res) => {
+    try {
+      const userId = String(req.params.id || "");
+      const requestedLimit = Number.parseInt(String(req.query.limit || "300"), 10);
+      const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? requestedLimit : 300, 1), 500);
+
+      const [targetUser] = await db.select({ id: users.id }).from(users).where(and(
+        eq(users.id, userId),
+        eq(users.tenantId, req.tenantId),
+      )).limit(1);
+      if (!targetUser) return res.status(404).json({ message: "User not found" });
+
+      const [auditRows, navigationRows] = await Promise.all([
+        db.select().from(auditLogs).where(and(
+          eq(auditLogs.tenantId, req.tenantId),
+          eq(auditLogs.userId, userId),
+        )).orderBy(desc(auditLogs.createdAt)).limit(limit),
+        db.select().from(pageViews).where(and(
+          eq(pageViews.tenantId, req.tenantId),
+          eq(pageViews.userId, userId),
+        )).orderBy(desc(pageViews.createdAt)).limit(limit),
+      ]);
+
+      const events = [
+        ...auditRows.map((row) => ({
+          id: `audit-${row.id}`,
+          source: "audit" as const,
+          category: "record_change" as const,
+          action: row.action,
+          title: row.action.replace(/_/g, " "),
+          entityType: row.entityType,
+          entityId: row.entityId,
+          path: null,
+          oldValue: row.oldValue,
+          newValue: row.newValue,
+          ipAddress: row.ipAddress,
+          location: null,
+          userAgent: null,
+          occurredAt: row.createdAt,
+          lastSeenAt: row.createdAt,
+        })),
+        ...navigationRows.map((row) => ({
+          id: `navigation-${row.id}`,
+          source: "navigation" as const,
+          category: "navigation" as const,
+          action: "view_page",
+          title: "Viewed page",
+          entityType: "page",
+          entityId: null,
+          path: row.path,
+          oldValue: null,
+          newValue: null,
+          ipAddress: row.ipAddress,
+          location: [row.city, row.region, row.country].filter(Boolean).join(", ") || null,
+          latitude: row.latitude,
+          longitude: row.longitude,
+          userAgent: row.userAgent,
+          occurredAt: row.createdAt,
+          lastSeenAt: row.lastSeenAt || row.createdAt,
+        })),
+      ].sort((a, b) => new Date(b.occurredAt || 0).getTime() - new Date(a.occurredAt || 0).getTime()).slice(0, limit);
+
+      const latestPresence = navigationRows.reduce<Date | null>((latest, row) => {
+        const candidate = row.lastSeenAt || row.createdAt;
+        if (!candidate) return latest;
+        return !latest || new Date(candidate).getTime() > latest.getTime() ? new Date(candidate) : latest;
+      }, null);
+      const now = Date.now();
+      const countSince = (milliseconds: number) => events.filter((event) =>
+        event.occurredAt && new Date(event.occurredAt).getTime() >= now - milliseconds,
+      ).length;
+
+      res.json({
+        generatedAt: new Date().toISOString(),
+        summary: {
+          totalEvents: events.length,
+          last24Hours: countSince(24 * 60 * 60 * 1000),
+          last7Days: countSince(7 * 24 * 60 * 60 * 1000),
+          uniquePages: new Set(navigationRows.map((row) => row.path)).size,
+          lastSeenAt: latestPresence?.toISOString() || null,
+          isOnline: latestPresence ? now - latestPresence.getTime() <= 5 * 60 * 1000 : false,
+        },
+        events,
+      });
+    } catch (error) {
+      console.error("Error loading user activity:", error);
+      res.status(500).json({ message: "Failed to load user activity" });
     }
   });
 

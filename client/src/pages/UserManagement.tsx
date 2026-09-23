@@ -26,6 +26,10 @@ import {
   Loader2,
   KeyRound,
   History,
+  RefreshCw,
+  Globe2,
+  Monitor,
+  FilePenLine,
 } from "lucide-react";
 import { EntityHistoryDrawer } from "@/components/history/EntityHistoryDrawer";
 import { useToast } from "@/hooks/use-toast";
@@ -500,6 +504,144 @@ function ActivityLogPanel({ users }: { users: any[] }) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+type UserActivityEvent = {
+  id: string;
+  source: "audit" | "navigation";
+  action: string;
+  title: string;
+  entityType?: string | null;
+  entityId?: number | null;
+  path?: string | null;
+  oldValue?: unknown;
+  newValue?: unknown;
+  ipAddress?: string | null;
+  location?: string | null;
+  userAgent?: string | null;
+  occurredAt?: string | null;
+  lastSeenAt?: string | null;
+};
+
+function describeDevice(userAgent?: string | null) {
+  if (!userAgent) return "Device not recorded";
+  const browser = /Edg\//.test(userAgent) ? "Edge" : /Chrome\//.test(userAgent) ? "Chrome" : /Firefox\//.test(userAgent) ? "Firefox" : /Safari\//.test(userAgent) ? "Safari" : "Browser";
+  const os = /Windows/.test(userAgent) ? "Windows" : /Android/.test(userAgent) ? "Android" : /iPhone|iPad/.test(userAgent) ? "iOS" : /Mac OS/.test(userAgent) ? "macOS" : /Linux/.test(userAgent) ? "Linux" : "Unknown OS";
+  return `${browser} on ${os}`;
+}
+
+function UserActivityProfile({ user }: { user: User }) {
+  const [source, setSource] = useState<"all" | "audit" | "navigation">("all");
+  const [query, setQuery] = useState("");
+  const { data, isLoading, isFetching, refetch, dataUpdatedAt } = useQuery<any>({
+    queryKey: ["/api/users", user.id, "activity"],
+    queryFn: async () => {
+      const response = await fetch(`/api/users/${encodeURIComponent(user.id)}/activity?limit=500`, { credentials: "include" });
+      if (!response.ok) throw new Error("Failed to load user activity");
+      return response.json();
+    },
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
+  });
+  const events: UserActivityEvent[] = data?.events || [];
+  const summary = data?.summary || {};
+  const filtered = events.filter((event) => {
+    if (source !== "all" && event.source !== source) return false;
+    const haystack = [event.action, event.title, event.entityType, event.entityId, event.path, event.location, event.ipAddress]
+      .filter(Boolean).join(" ").toLowerCase();
+    return !query.trim() || haystack.includes(query.trim().toLowerCase());
+  });
+
+  return (
+    <div className="space-y-5" data-testid={`user-activity-${user.id}`}>
+      <div className="rounded-2xl border border-indigo-500/20 bg-gradient-to-br from-indigo-500/10 via-background to-cyan-500/5 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <Activity className="h-5 w-5 text-indigo-500" />
+              <h4 className="font-bold text-base">Enterprise Activity Intelligence</h4>
+              <Badge className={summary.isOnline ? "bg-emerald-500/15 text-emerald-600 border-emerald-500/20" : "bg-muted text-muted-foreground"}>
+                {summary.isOnline ? "● Online now" : "Offline"}
+              </Badge>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">Tenant-scoped, read-only event history. Refreshes automatically every 15 seconds.</p>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching} className="gap-2 rounded-xl">
+            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
+            Refresh now
+          </Button>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-5">
+          {[
+            ["Visible events", summary.totalEvents ?? 0],
+            ["Last 24 hours", summary.last24Hours ?? 0],
+            ["Last 7 days", summary.last7Days ?? 0],
+            ["Unique pages", summary.uniquePages ?? 0],
+            ["Last seen", summary.lastSeenAt ? new Date(summary.lastSeenAt).toLocaleString() : "Never"],
+          ].map(([label, value]) => (
+            <div key={String(label)} className="rounded-xl border bg-background/75 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</div>
+              <div className="mt-1 text-sm font-bold break-words">{value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col md:flex-row gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search action, page, record, location or IP…" className="pl-9 rounded-xl" />
+        </div>
+        <select value={source} onChange={(event) => setSource(event.target.value as typeof source)} className="rounded-xl border bg-background px-3 py-2 text-sm">
+          <option value="all">All activity</option>
+          <option value="audit">Record changes</option>
+          <option value="navigation">Page navigation</option>
+        </select>
+      </div>
+
+      {isLoading ? (
+        <div className="py-12 text-center text-sm text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />Loading detailed activity…</div>
+      ) : filtered.length === 0 ? (
+        <div className="py-12 text-center rounded-2xl border bg-muted/20 text-sm text-muted-foreground">No activity matches these filters.</div>
+      ) : (
+        <div className="rounded-2xl border overflow-hidden divide-y max-h-[52vh] overflow-y-auto">
+          {filtered.map((event) => (
+            <div key={event.id} className="p-4 bg-card hover:bg-muted/20 transition-colors">
+              <div className="flex items-start gap-3">
+                <div className={`rounded-xl p-2 ${event.source === "navigation" ? "bg-cyan-500/10 text-cyan-600" : "bg-indigo-500/10 text-indigo-600"}`}>
+                  {event.source === "navigation" ? <Globe2 className="h-4 w-4" /> : <FilePenLine className="h-4 w-4" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-sm capitalize">{event.title || event.action.replace(/_/g, " ")}</span>
+                    <Badge variant="outline" className="text-[10px]">{event.source === "navigation" ? "Navigation" : "Audit event"}</Badge>
+                    {event.entityType && <Badge variant="secondary" className="text-[10px]">{event.entityType}{event.entityId ? ` #${event.entityId}` : ""}</Badge>}
+                  </div>
+                  {event.path && <div className="mt-1 text-xs font-mono text-cyan-700 dark:text-cyan-300 break-all">{event.path}</div>}
+                  <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{event.occurredAt ? new Date(event.occurredAt).toLocaleString() : "Unknown time"}</span>
+                    <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{event.location || event.ipAddress || "Location not recorded"}</span>
+                    <span className="flex items-center gap-1"><Monitor className="h-3 w-3" />{describeDevice(event.userAgent)}</span>
+                    {event.ipAddress && <span className="font-mono">IP: {event.ipAddress}</span>}
+                  </div>
+                  {(event.oldValue != null || event.newValue != null) && (
+                    <details className="mt-3 rounded-xl border bg-muted/20 px-3 py-2 text-xs">
+                      <summary className="cursor-pointer font-semibold text-foreground">Inspect before / after record details</summary>
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 mt-2">
+                        <pre className="overflow-auto rounded-lg bg-background p-2 text-[10px] whitespace-pre-wrap break-all"><strong>Before</strong>{"\n"}{JSON.stringify(event.oldValue, null, 2) || "—"}</pre>
+                        <pre className="overflow-auto rounded-lg bg-background p-2 text-[10px] whitespace-pre-wrap break-all"><strong>After</strong>{"\n"}{JSON.stringify(event.newValue, null, 2) || "—"}</pre>
+                      </div>
+                    </details>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="text-[10px] text-muted-foreground text-right">Last refreshed {dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString() : "—"}</div>
     </div>
   );
 }
@@ -1869,7 +2011,7 @@ export default function UserManagement() {
             </DialogHeader>
 
             <Tabs defaultValue="general" className="w-full space-y-6">
-              <TabsList className="bg-secondary border border-border p-1 rounded-2xl w-full grid grid-cols-4">
+              <TabsList className="bg-secondary border border-border p-1 rounded-2xl w-full grid grid-cols-5">
                 <TabsTrigger value="general" className="rounded-xl text-muted-foreground data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow font-semibold">
                   1. General Info
                 </TabsTrigger>
@@ -1881,6 +2023,9 @@ export default function UserManagement() {
                 </TabsTrigger>
                 <TabsTrigger value="scopes" className="rounded-xl text-muted-foreground data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow font-semibold">
                   4. Geographic Scopes
+                </TabsTrigger>
+                <TabsTrigger value="activity" className="rounded-xl text-muted-foreground data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow font-semibold" data-testid="tab-user-activity">
+                  5. Activity
                 </TabsTrigger>
               </TabsList>
 
@@ -2342,6 +2487,10 @@ export default function UserManagement() {
                     </div>
                   </div>
                 </div>
+              </TabsContent>
+
+              <TabsContent value="activity" className="space-y-4">
+                <UserActivityProfile user={selectedUser} />
               </TabsContent>
             </Tabs>
 
