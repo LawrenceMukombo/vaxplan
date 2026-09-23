@@ -1,0 +1,11 @@
+name,facilityHmisCode,gender,phone,nrc,age,educationLevel,trainingReceived,roleDescription,yearsOfService,siaRole,employmentStatus
+Nomvula Khumalo,ZAF-52492,female,+27821123456,9105120289084,34,Grade 12 / Matric,Integrated Community Case Management & Zero-Dose Tracing,Community Health Worker - eMatikwe Section 1,5,mobilizer,Active - In-service
+Sibusiso Buthelezi,ZAF-52492,male,+27832234567,8508245389082,40,Grade 12 / Matric,Ward-Based Outreach Team (WBOT) & Event-Based Surveillance,Community Health Worker - eMatikwe Section 2,7,mobilizer,Active - In-service
+Zanele Ndlovu,ZAF-52492,female,+27723345678,9603150489088,29,Certificate in Community Health,Defaulter Tracing & Road to Health Card Auditing,Community Health Worker - Inanda North,4,recorder,Active - In-service
+Bongani Zulu,ZAF-52492,male,+27794456789,8811095589081,37,Grade 12 / Matric,Vaccine Cold Box Logistics & Rural Settlement Outreach,Community Health Worker - Amatikwe Valley,6,mobilizer,Active - In-service
+Thandeka Mthembu,ZAF-52492,female,+27845567890,9307280689086,32,Certificate in Nursing Auxiliary,Routine Immunization Demand Generation & Caregiver Counseling,Community Health Worker - Ntuzuma Link,5,mobilizer,Active - In-service
+Nhlanhla Mkhize,ZAF-52492,male,+27716678901,8002145789089,45,Certificate in Public Health,Community Microplanning Lead & Household Profiling,Community Health Worker - Supervisor,10,supervisor,Active - In-service
+Lindiwe Cele,ZAF-52492,female,+27827789012,9812040889083,27,Grade 12 / Matric,Adverse Events Following Immunization (AEFI) Reporting & Notification,Community Health Worker - eMatikwe Section 3,3,mobilizer,Active - In-service
+Mandla Sithole,ZAF-52492,male,+27738890123,8909185989080,36,Grade 12 / Matric,SIA Catch-up Campaign Mobilization & School Entry Checks,Community Health Worker - Amatikwe Central,6,vaccinator,Active - In-service
+Precious Dube,ZAF-52492,female,+27819901234,9406021089085,31,Certificate in Community Health,Mother and Baby Tracking & Clinic Appointment Reminders,Community Health Worker - Kwashange,4,recorder,Active - In-service
+Siphiwe Gumede,ZAF-52492,female,+27761012345,9001151189087,35,Grade 12 / Matric,Community Dialogue Facilitation & Vaccine Hesitancy Engagement,Community Health Worker - eMatikwe Section 4,6,mobilizer,Active - In-service

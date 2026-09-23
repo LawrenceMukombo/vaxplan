@@ -1,0 +1,16 @@
+# gender: female | male | other
+# role: vaccinator | recorder | supervisor | facility_in_charge | nurse | midwife | chw | driver | cold_chain_officer
+# campaign_role: vaccinator | mobilizer | volunteer | supervisor | recorder | logistics
+# education_level: primary | secondary | certificate | bachelors | masters | phd
+# training_status: trained | not_trained | refresher_needed | in_training
+# is_active: Yes | No (default Yes)
+# is_volunteer: Yes | No (default No)
+full_name,employee_id,nrc,gender,role,campaign_role,position,contact_phone,education_level,training_status,years_experience,years_at_facility,residence_village,is_active,is_volunteer,facility_name,district_name,province_name
+Sr. Nonhlanhla Dlamini,PERSAL-81023910,8204120289088,female,facility_in_charge,supervisor,Operational Manager Nursing - PHC,+27821001122,bachelors,trained,12,5,eMatikwe,Yes,No,Matikwe Clinic,eThekwini,KwaZulu-Natal
+Sister Zama Sithole,PERSAL-81023911,8809230189085,female,nurse,vaccinator,Professional Nurse - EPI Coordinator,+27832002233,bachelors,trained,8,4,Inanda,Yes,No,Matikwe Clinic,eThekwini,KwaZulu-Natal
+Nurse Ayanda Ngcobo,PERSAL-81023912,9205160389083,female,vaccinator,vaccinator,Staff Nurse - Child Immunization & Road to Health,+27723003344,certificate,trained,5,3,Amatikwe,Yes,No,Matikwe Clinic,eThekwini,KwaZulu-Natal
+Thabo Mokoena,PERSAL-81023913,8507305489081,male,cold_chain_officer,logistics,Environmental Health Practitioner - Cold Chain Logistics,+27794004455,bachelors,trained,7,2,Phoenix,Yes,No,Matikwe Clinic,eThekwini,KwaZulu-Natal
+Phindile Cele,PERSAL-81023914,9511180589087,female,recorder,recorder,Health Information Officer - DHIS & Tallying,+27845005566,certificate,trained,4,2,Ntuzuma,Yes,No,Matikwe Clinic,eThekwini,KwaZulu-Natal
+Siyabonga Gwala,PERSAL-81023915,8703145689089,male,driver,logistics,Mobile Health Outreach Driver,+27716006677,secondary,trained,10,6,eMatikwe,Yes,No,Matikwe Clinic,eThekwini,KwaZulu-Natal
+Nompumelelo Majola,PERSAL-81023916,9008250789082,female,midwife,vaccinator,Certified Advanced Midwife - Birth Dose Lead,+27827007788,bachelors,trained,9,4,Inanda,Yes,No,Matikwe Clinic,eThekwini,KwaZulu-Natal
+Bheki Khanyile,PERSAL-81023917,8412025889080,male,chw,mobilizer,Ward-Based Outreach Team (WBOT) Coordinator,+27738008899,secondary,trained,6,3,Amatikwe,Yes,Yes,Matikwe Clinic,eThekwini,KwaZulu-Natal

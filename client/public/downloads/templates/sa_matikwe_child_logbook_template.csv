@@ -1,0 +1,13 @@
+Unique ID,First Name,Last Name,Gender,Date of Birth,Caregiver Name,Contact Phone,Province,District,Facility,Community,Client Type,Status
+ZAF-KZN-001,Minenhle,Khumalo,female,2026-02-14,Busisiwe Khumalo,+27821123456,KwaZulu-Natal,eThekwini,Matikwe Clinic,eMatikwe,child,resident
+ZAF-KZN-002,Bandile,Ndlovu,male,2026-01-20,Thandiwe Ndlovu,+27832234567,KwaZulu-Natal,eThekwini,Matikwe Clinic,eMatikwe,child,resident
+ZAF-KZN-003,Amahle,Zulu,female,2025-11-10,Nokuthula Zulu,+27723345678,KwaZulu-Natal,eThekwini,Matikwe Clinic,Amatikwe,child,resident
+ZAF-KZN-004,Lwandle,Buthelezi,male,2025-10-02,Hlengiwe Buthelezi,+27794456789,KwaZulu-Natal,eThekwini,Matikwe Clinic,Amatikwe,child,resident
+ZAF-KZN-005,Siyanda,Mthembu,male,2026-03-05,Zodwa Mthembu,+27845567890,KwaZulu-Natal,eThekwini,Matikwe Clinic,eMatikwe,child,resident
+ZAF-KZN-006,Olwethu,Cele,female,2025-08-18,Nompumelelo Cele,+27716678901,KwaZulu-Natal,eThekwini,Matikwe Clinic,Inanda,child,resident
+ZAF-KZN-007,Sphesihle,Mkhize,male,2025-09-25,Khethiwe Mkhize,+27827789012,KwaZulu-Natal,eThekwini,Matikwe Clinic,Ntuzuma,child,resident
+ZAF-KZN-008,Andile,Sithole,female,2026-01-12,Slindile Sithole,+27738890123,KwaZulu-Natal,eThekwini,Matikwe Clinic,eMatikwe,child,resident
+ZAF-KZN-009,Melokuhle,Dube,male,2025-12-04,Zinhle Dube,+27819901234,KwaZulu-Natal,eThekwini,Matikwe Clinic,Kwashange,child,resident
+ZAF-KZN-010,Lungelo,Ngcobo,male,2025-07-15,Sibongile Ngcobo,+27761012345,KwaZulu-Natal,eThekwini,Matikwe Clinic,Amatikwe,child,resident
+ZAF-KZN-011,Nkazimulo,Majola,female,2026-02-22,Duduzile Majola,+27822123456,KwaZulu-Natal,eThekwini,Matikwe Clinic,eMatikwe,child,resident
+ZAF-KZN-012,Snenhlanhla,Gwala,female,2025-06-30,Philisiwe Gwala,+27833234567,KwaZulu-Natal,eThekwini,Matikwe Clinic,Inanda,child,resident

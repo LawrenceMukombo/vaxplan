@@ -1,0 +1,8 @@
+ID,Facility ID,Facility Name,Equipment Type,Brand,Model,Serial Number,Catalog Number,Capacity (L),Net Storage Capacity (L),Power Source,Condition,Manufacture Year,Installation Date,Last Service Date
+,27323,"Matikwe Clinic",solar_direct_drive_refrigerator,"Dulas Arctiko","PURE 50","SN-KZN-052492-01","E003/042",55.00,45.00,solar,functional,2023,2023-04-12,2026-04-10
+,27323,"Matikwe Clinic",icm,"Haier","HBC-80","SN-KZN-052492-02","E003/014",80.00,68.00,electric,functional,2022,2022-09-18,2026-05-15
+,27323,"Matikwe Clinic",freezer,"Vestfrost","MF 314","SN-KZN-052492-03","E003/023",281.00,230.00,electric,functional,2021,2021-11-05,2026-03-20
+,27323,"Matikwe Clinic",cold_box,"AOV","AOV-CB-25","SN-KZN-052492-04","E004/008",24.00,20.00,none,functional,2023,2023-02-14,2026-04-01
+,27323,"Matikwe Clinic",vaccine_carrier,"Blowings","VC-2.6L","SN-KZN-052492-05","E004/020",2.60,2.20,none,functional,2024,2024-01-10,2026-06-02
+,27323,"Matikwe Clinic",vaccine_carrier,"Blowings","VC-2.6L","SN-KZN-052492-06","E004/020",2.60,2.20,none,functional,2024,2024-01-10,2026-06-02
+,27323,"Matikwe Clinic",solar_direct_drive_refrigerator,"B Medical Systems","TCW40SDD","SN-KZN-052492-07","E003/038",43.50,36.00,solar,functional,2024,2024-03-22,2026-05-10

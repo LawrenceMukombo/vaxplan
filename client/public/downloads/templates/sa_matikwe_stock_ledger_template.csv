@@ -1,0 +1,15 @@
+Facility Name,Facility ID,Facility HMIS,Vaccine / Commodity Name,Product Code,Transaction Type,Quantity (Doses),Batch Number,Expiry Date,VVM Status,Supplier / Recipient,Transaction Date,Notes
+Matikwe Clinic,27323,ZAF-52492,BCG,vaccine_bcg,receipt,600,BCG-ZAF-2026A,2027-12-31,1,eThekwini District Sub-Depot,2026-09-01,Monthly routine allocation
+Matikwe Clinic,27323,ZAF-52492,OPV,vaccine_opv,receipt,800,OPV-ZAF-9912,2027-10-15,1,eThekwini District Sub-Depot,2026-09-01,Birth dose OPV allocation
+Matikwe Clinic,27323,ZAF-52492,PENTA,vaccine_penta,receipt,1500,PEN-ZAF-4401,2028-03-31,1,eThekwini District Sub-Depot,2026-09-01,Hexaxim (DTP-IPV-Hib-HepB) bulk delivery
+Matikwe Clinic,27323,ZAF-52492,PENTA,vaccine_penta,issue,180,PEN-ZAF-4401,2028-03-31,1,eMatikwe Mobile Outreach Team,2026-09-05,Weekly community mobile session
+Matikwe Clinic,27323,ZAF-52492,PCV,vaccine_pcv,receipt,1000,PCV-ZAF-1123,2028-01-31,1,eThekwini District Sub-Depot,2026-09-01,Pneumococcal conjugate 13-valent stock
+Matikwe Clinic,27323,ZAF-52492,Rotavirus,vaccine_rota,receipt,800,ROT-ZAF-5509,2027-09-30,1,eThekwini District Sub-Depot,2026-09-01,Rotarix oral suspension stock
+Matikwe Clinic,27323,ZAF-52492,MR,vaccine_mr,receipt,700,MR-ZAF-7744,2027-11-20,1,eThekwini District Sub-Depot,2026-09-01,Measles 6-month and 12-month doses
+Matikwe Clinic,27323,ZAF-52492,MR,vaccine_mr,loss,10,MR-ZAF-7744,2027-11-20,3,Cold Room Clinic,2026-09-12,VVM stage 3 heat exposure during power outage
+Matikwe Clinic,27323,ZAF-52492,HPV,vaccine_hpv,receipt,400,HPV-ZAF-8812,2028-05-31,1,eThekwini District Sub-Depot,2026-09-01,Grade 5 school health campaign stock
+Matikwe Clinic,27323,ZAF-52492,COVID-19 vaccine,vaccine_covid19,receipt,300,COV-ZAF-2201,2027-04-30,1,eThekwini District Sub-Depot,2026-09-01,High-risk adult booster supply
+Matikwe Clinic,27323,ZAF-52492,AD Syringe 0.5ml,SYR-05,receipt,3000,SYR-2026-SA1,2029-12-31,1,National Medical Supplies,2026-09-01,0.5ml auto-disable syringes
+Matikwe Clinic,27323,ZAF-52492,Safety Box 5L,BOX-5L,receipt,150,BOX-2026-SA2,2030-12-31,1,National Medical Supplies,2026-09-01,Yellow 5L sharps safety boxes
+Matikwe Clinic,27323,ZAF-52492,PENTA,vaccine_penta,issue,220,PEN-ZAF-4401,2028-03-31,1,Fixed Post MCH Room 1,2026-09-08,Daily under-1 clinic immunization
+Matikwe Clinic,27323,ZAF-52492,Rotavirus,vaccine_rota,issue,140,ROT-ZAF-5509,2027-09-30,1,Fixed Post MCH Room 1,2026-09-08,Daily under-1 clinic immunization
