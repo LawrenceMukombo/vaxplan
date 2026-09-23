@@ -1,6 +1,6 @@
-﻿import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { offlineDb, enqueueOutbox } from "./offlineDb";
-import { loadActiveTenant, loadTenantsCache } from "./tenantCache";
+import { loadActiveTenant, loadTenantsCache, saveTenantsCache, saveActiveTenant } from "./tenantCache";
 import {
   broadcastLogout,
   clearClientAuthStorage,
@@ -68,7 +68,15 @@ async function getOfflineData(url: string): Promise<any> {
   // Scope all entity reads to the active tenant so that platform admins
   // who browse multiple countries never see records from a previous country.
   const _activeTenantId = ((): string | null => {
-    try { return loadActiveTenant()?.id ?? null; } catch { return null; }
+    try {
+      const active = loadActiveTenant();
+      if (active?.id) return active.id;
+      const user = getValidOfflineUser();
+      if ((user as any)?.tenantId) return (user as any).tenantId;
+      const list = loadTenantsCache();
+      if (list.length > 0 && list[0]?.id) return list[0].id;
+      return null;
+    } catch { return null; }
   })();
   if (!_activeTenantId) throw new Error("No active tenant is selected for offline access.");
   const _byTenant = async <T>(table: { where(idx: string): { equals(v: string): { toArray(): Promise<T[]> } } }): Promise<T[]> =>
@@ -793,6 +801,171 @@ export const queryClient = new QueryClient({
 */
 
 // ─── Refactored TanStack React Query with Offline-First Bridging ───────────
+/**
+ * Automatically mirror successful GET query responses into local IndexedDB (Dexie).
+ * Runs asynchronously in the background so it never blocks UI rendering.
+ */
+async function cacheOnlineResponseToIndexedDB(url: string, data: any): Promise<void> {
+  if (!data || typeof data !== "object") return;
+  const [pathname] = url.split("?");
+  const activeTenantId = ((): string => {
+    try {
+      const active = loadActiveTenant();
+      if (active?.id) return active.id;
+      const user = getValidOfflineUser();
+      if ((user as any)?.tenantId) return (user as any).tenantId;
+      const list = loadTenantsCache();
+      if (list.length > 0 && list[0]?.id) return list[0].id;
+      return "1";
+    } catch {
+      return "1";
+    }
+  })();
+  const now = Date.now();
+
+  try {
+    if (pathname === "/api/facilities" && Array.isArray(data)) {
+      const list = data.map((f: any) => ({
+        id: Number(f.id),
+        tenantId: String(f.tenantId || activeTenantId),
+        name: f.name || `Facility #${f.id}`,
+        facilityType: f.facilityType || "Health Centre",
+        hmisCode: f.hmisCode || undefined,
+        provinceId: f.provinceId ? Number(f.provinceId) : undefined,
+        districtId: f.districtId ? Number(f.districtId) : undefined,
+        latitude: f.latitude ? Number(f.latitude) : undefined,
+        longitude: f.longitude ? Number(f.longitude) : undefined,
+        _syncedAt: now,
+      }));
+      if (list.length > 0) await offlineDb.facilities.bulkPut(list);
+    } else if (pathname === "/api/villages" && Array.isArray(data)) {
+      const list = data.map((v: any) => ({
+        id: Number(v.id),
+        tenantId: String(v.tenantId || activeTenantId),
+        name: v.name || `Village #${v.id}`,
+        llgId: v.llgId ? Number(v.llgId) : undefined,
+        districtId: v.districtId ? Number(v.districtId) : undefined,
+        facilityId: v.assignedFacilityId ? Number(v.assignedFacilityId) : (v.facilityId ? Number(v.facilityId) : undefined),
+        latitude: v.latitude ? Number(v.latitude) : undefined,
+        longitude: v.longitude ? Number(v.longitude) : undefined,
+        outreachLatitude: v.outreachLatitude ? Number(v.outreachLatitude) : undefined,
+        outreachLongitude: v.outreachLongitude ? Number(v.outreachLongitude) : undefined,
+        outreachPostName: v.outreachPostName || undefined,
+        _syncedAt: now,
+      }));
+      if (list.length > 0) await offlineDb.villages.bulkPut(list);
+    } else if (pathname === "/api/provinces" && Array.isArray(data)) {
+      const list = data.map((p: any) => ({ ...p, id: Number(p.id), tenantId: String(p.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.provinces.bulkPut(list);
+    } else if (pathname === "/api/districts" && Array.isArray(data)) {
+      const list = data.map((d: any) => ({ ...d, id: Number(d.id), tenantId: String(d.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.districts.bulkPut(list);
+    } else if (pathname === "/api/regions" && Array.isArray(data)) {
+      const list = data.map((r: any) => ({ ...r, id: Number(r.id), tenantId: String(r.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.regions.bulkPut(list);
+    } else if (pathname === "/api/llgs" && Array.isArray(data)) {
+      const list = data.map((l: any) => ({ ...l, id: Number(l.id), tenantId: String(l.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.llgs.bulkPut(list);
+    } else if ((pathname === "/api/sessions" || pathname === "/api/session-plans") && Array.isArray(data)) {
+      const list = data.map((s: any) => ({
+        ...s,
+        id: Number(s.id),
+        name: s.name || s.planName || `Session #${s.id}`,
+        planName: s.name || s.planName,
+        tenantId: String(s.tenantId || activeTenantId),
+        _syncedAt: now,
+      }));
+      if (list.length > 0) await offlineDb.sessionPlans.bulkPut(list);
+    } else if (pathname === "/api/session-day-plans" && Array.isArray(data)) {
+      const list = data.map((d: any) => ({ ...d, id: Number(d.id), tenantId: String(d.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.sessionDayPlans.bulkPut(list);
+    } else if (pathname === "/api/sessions/villages" && Array.isArray(data)) {
+      const list = data.map((l: any) => ({ ...l, tenantId: String(l.tenantId || activeTenantId) }));
+      if (list.length > 0) await offlineDb.sessionVillageLinks.bulkPut(list);
+    } else if (pathname === "/api/stock/ledger" && Array.isArray(data)) {
+      const list = data.map((t: any) => ({ ...t, id: Number(t.id), tenantId: String(t.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.stockTransactions.bulkPut(list);
+    } else if (pathname === "/api/monthly-reports" && Array.isArray(data)) {
+      const list = data.map((m: any) => ({ ...m, id: Number(m.id), tenantId: String(m.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.monthlyReports.bulkPut(list);
+    } else if (pathname === "/api/microplans") {
+      if (Array.isArray(data)) {
+        const list = data.map((m: any) => ({
+          ...m,
+          id: isNaN(Number(m.id)) ? m.id : Number(m.id),
+          tenantId: String(m.tenantId || activeTenantId),
+          _syncedAt: now,
+        }));
+        if (list.length > 0) await offlineDb.microplans.bulkPut(list);
+      } else if (data && data.id) {
+        await offlineDb.microplans.put({
+          ...data,
+          id: isNaN(Number(data.id)) ? data.id : Number(data.id),
+          tenantId: String(data.tenantId || activeTenantId),
+          _syncedAt: now,
+        });
+      }
+    } else if (/^\/api\/microplans\/[^/]+$/.test(pathname) && data && data.id) {
+      await offlineDb.microplans.put({
+        ...data,
+        id: isNaN(Number(data.id)) ? data.id : Number(data.id),
+        tenantId: String(data.tenantId || activeTenantId),
+        _syncedAt: now,
+      });
+    } else if (pathname === "/api/budget-items" && Array.isArray(data)) {
+      const list = data.map((b: any) => ({ ...b, id: Number(b.id), tenantId: String(b.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.budgetItems.bulkPut(list);
+    } else if (pathname === "/api/mobilization" && Array.isArray(data)) {
+      const list = data.map((m: any) => ({ ...m, id: Number(m.id), tenantId: String(m.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.mobilizationActivities.bulkPut(list);
+    } else if (pathname === "/api/supervision-visits") {
+      if (Array.isArray(data)) {
+        const list = data.map((s: any) => ({
+          ...s,
+          id: isNaN(Number(s.id)) ? s.id : Number(s.id),
+          tenantId: String(s.tenantId || activeTenantId),
+          _syncedAt: now,
+        }));
+        if (list.length > 0) await offlineDb.supervisionVisits.bulkPut(list);
+      } else if (data && data.id) {
+        await offlineDb.supervisionVisits.put({
+          ...data,
+          id: isNaN(Number(data.id)) ? data.id : Number(data.id),
+          tenantId: String(data.tenantId || activeTenantId),
+          _syncedAt: now,
+        });
+      }
+    } else if (pathname === "/api/supervision-checklist-templates" && Array.isArray(data)) {
+      const list = data.map((t: any) => ({ ...t, id: isNaN(Number(t.id)) ? t.id : Number(t.id), tenantId: String(t.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.supervisionTemplates.bulkPut(list);
+    } else if (pathname === "/api/cold-chain" && Array.isArray(data)) {
+      const list = data.map((c: any) => ({ ...c, id: isNaN(Number(c.id)) ? c.id : Number(c.id), tenantId: String(c.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.coldChainEquipment.bulkPut(list);
+    } else if (pathname === "/api/gis-polygons" && Array.isArray(data)) {
+      const list = data.map((g: any) => ({ ...g, id: isNaN(Number(g.id)) ? g.id : Number(g.id), tenantId: String(g.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.gisPolygons.bulkPut(list);
+    } else if (pathname === "/api/settlements" && Array.isArray(data)) {
+      const list = data.map((s: any) => ({ ...s, id: isNaN(Number(s.id)) ? s.id : Number(s.id), tenantId: String(s.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.settlements.bulkPut(list);
+    } else if (pathname === "/api/clients" && Array.isArray(data)) {
+      const list = data.map((c: any) => ({ ...c, id: String(c.id), tenantId: String(c.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.clients.bulkPut(list);
+    } else if ((pathname === "/api/vaccines/config" || pathname === "/api/vaccines") && Array.isArray(data)) {
+      const list = data.map((v: any) => ({ ...v, id: Number(v.id), tenantId: String(v.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.vaccineConfigs.bulkPut(list);
+    } else if (pathname === "/api/population" && Array.isArray(data)) {
+      const list = data.map((p: any) => ({ ...p, id: Number(p.id), tenantId: String(p.tenantId || activeTenantId), _syncedAt: now }));
+      if (list.length > 0) await offlineDb.populationData.bulkPut(list);
+    } else if (pathname === "/api/public/tenants" && Array.isArray(data)) {
+      saveTenantsCache(data);
+    } else if (pathname === "/api/me/tenant" && data && typeof data === "object" && data.id) {
+      saveActiveTenant(data);
+    }
+  } catch (err) {
+    console.warn("[IndexedDB Auto-Cache] Non-blocking cache warning for", pathname, err);
+  }
+}
+
 type UnauthorizedBehavior = "returnNull" | "throw";
 export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;
@@ -889,6 +1062,14 @@ export const getQueryFn: <T>(options: {
     // server's actual message instead of falling through to IndexedDB.
     if (isJson) {
       if (!res.ok) {
+        if (res.status >= 500 && !isAuthUserQuery) {
+          try {
+            console.warn(`Server error ${res.status}, attempting offline cache fallback for ${url}`);
+            return await getOfflineData(url);
+          } catch {
+            // fall through to error handling
+          }
+        }
         let message = `${res.status}`;
         try {
           const body = await res.json();
@@ -903,9 +1084,12 @@ export const getQueryFn: <T>(options: {
         throw new Error(message);
       }
       const data = await res.json();
-      if (url === "/api/auth/user" && data) {
+      if ((url === "/api/auth/user" || url.startsWith("/api/auth/user?")) && data) {
         recordOnlineAuthSession(data);
       }
+      setTimeout(() => {
+        void cacheOnlineResponseToIndexedDB(url, data);
+      }, 0);
       return data;
     }
 

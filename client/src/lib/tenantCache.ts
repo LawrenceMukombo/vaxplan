@@ -100,12 +100,25 @@ export function getActiveSyncTenantId(user: {
   tenantId: string | null; // null is valid for users awaiting tenant provisioning
   isPlatformAdmin?: boolean;
 } | null | undefined): string | null {
-  if (!user?.tenantId) return null;
+  if (!user) {
+    const active = loadActiveTenant();
+    if (active?.id) return active.id;
+    return null;
+  }
   if (user.isPlatformAdmin) {
     const active = loadActiveTenant();
     if (active?.id) return active.id;
+    if (user.tenantId) return user.tenantId;
+    const cache = loadTenantsCache();
+    if (cache.length > 0 && cache[0]?.id) return cache[0].id;
+    return null;
   }
-  return user.tenantId;
+  if (user.tenantId) return user.tenantId;
+  const active = loadActiveTenant();
+  if (active?.id) return active.id;
+  const cache = loadTenantsCache();
+  if (cache.length > 0 && cache[0]?.id) return cache[0].id;
+  return null;
 }
 
 /**

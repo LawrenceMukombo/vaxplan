@@ -12,7 +12,7 @@
  *   POST /api/sync/batch even when the page/PWA is closed.
  */
 
-const CACHE_VERSION = "vaxplan-v8";
+const CACHE_VERSION = "vaxplan-v9";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const TILES_CACHE = `${CACHE_VERSION}-tiles`;
 const API_CACHE = `${CACHE_VERSION}-api`;
@@ -20,9 +20,8 @@ const API_CACHE = `${CACHE_VERSION}-api`;
 const STATIC_ASSETS = [
   "/",
   "/index.html",
-  "/manifest.webmanifest",
+  "/manifest.json",
   "/offline.html",
-  "/favicon.ico",
   "/favicon.png",
   "/icons/icon-192.png",
   "/icons/icon-512.png"
@@ -51,18 +50,28 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(STATIC_CACHE);
-      await cache.addAll(STATIC_ASSETS);
-      // Best-effort precache of build-pinned URLs from Workbox manifest.
       const manifestUrls = WB_MANIFEST.map((e) => (typeof e === "string" ? e : e.url)).filter(
         Boolean,
       );
-      if (manifestUrls.length) {
-        try {
-          await cache.addAll(manifestUrls);
-        } catch {
-          /* ignore individual failures */
-        }
-      }
+      const allUrls = Array.from(new Set([...STATIC_ASSETS, ...manifestUrls]));
+
+      // Resilient precache: individual asset failures won't abort SW installation
+      await Promise.allSettled(
+        allUrls.map(async (assetUrl) => {
+          try {
+            const response = await fetch(assetUrl, { cache: "reload" });
+            if (response && (response.ok || response.type === "opaque")) {
+              await cache.put(assetUrl, response);
+            }
+          } catch {
+            /* ignore individual failure */
+          }
+        }),
+      );
+
+      // Immediately activate so the client gains full offline support without waiting
+      await self.skipWaiting();
+
       // Notify any open clients that a new SW is waiting to activate.
       const clients = await self.clients.matchAll({ includeUncontrolled: true });
       clients.forEach((c) => c.postMessage({ type: "SW_INSTALLED", version: CACHE_VERSION }));
@@ -122,7 +131,7 @@ self.addEventListener("fetch", (event) => {
 
 async function cacheFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
-  const cached = await cache.match(request);
+  const cached = (await cache.match(request)) || (await cache.match(request, { ignoreSearch: true }));
   if (cached) return cached;
   try {
     const response = await fetch(request);
@@ -131,7 +140,8 @@ async function cacheFirst(request, cacheName) {
     }
     return response;
   } catch (err) {
-    return cached || new Response("", { status: 408 });
+    const fallback = await cache.match(request, { ignoreSearch: true });
+    return fallback || cached || new Response("", { status: 408 });
   }
 }
 

@@ -101,7 +101,7 @@ if (import.meta.env.DEV && "serviceWorker" in navigator) {
 // components like InstallPrompt can offer a "Reload to update" action,
 // and the Background Sync handler can find a ready registration.
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
+  const registerWorker = () => {
     navigator.serviceWorker
       .register("/sw.js", { scope: "/" })
       .then((reg) => {
@@ -133,5 +133,11 @@ if ("serviceWorker" in navigator) {
     navigator.serviceWorker.addEventListener("controllerchange", () => {
       window.dispatchEvent(new CustomEvent("vaxplan:sw-controller-changed"));
     });
-  });
+  };
+
+  if (document.readyState === "complete") {
+    registerWorker();
+  } else {
+    window.addEventListener("load", registerWorker);
+  }
 }
