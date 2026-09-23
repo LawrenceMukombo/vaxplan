@@ -47,7 +47,7 @@ export async function fetchLocalRadiusPopulation(
     `WITH params AS (
        SELECT ST_Buffer(
          ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
-         $4 * 1000
+         ($4::double precision) * 1000
        )::geometry AS circle
      ), clipped AS (
        SELECT

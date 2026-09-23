@@ -16559,7 +16559,8 @@ Instructions:
       let skippedNoFacility = 0;
 
       for (const chv of chvs) {
-        if (!chv.fullName) continue;
+        const fullName = (chv.fullName || chv.name || "").toString().trim();
+        if (!fullName) continue;
         const rawCode = (chv.facilityHmisCode || chv.facilityName || chv.facilityId || "").toString().trim().toLowerCase();
         
         let facId = rawCode ? (hmisMap.get(rawCode) || nameMap.get(rawCode) || idMap.get(rawCode)) : undefined;
@@ -16590,9 +16591,9 @@ Instructions:
         await db.insert(chvProfiles).values({
           tenantId: req.tenantId,
           facilityId: facId,
-          fullName: chv.fullName,
+          fullName,
           gender: chv.gender || "female",
-          contactPhone: chv.contactPhone || null,
+          contactPhone: chv.contactPhone || chv.phone || null,
           nrc: chv.nrc || null,
           age: chv.age || null,
           educationLevel: chv.educationLevel || "primary",
