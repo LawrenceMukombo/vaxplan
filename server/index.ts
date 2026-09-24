@@ -6,6 +6,8 @@ try {
   // .env file is optional - silently skip if not present (e.g. production with real env vars)
 }
 import express, { type Request, Response, NextFunction } from "express";
+import fs from "fs";
+import path from "path";
 import compression from "compression";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -774,7 +776,9 @@ async function backfillClientIds() {
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
   const isBuiltServer =
-    /[\\/]dist[\\/]index\.cjs$/i.test(process.argv[1] || "");
+    /[\\/]dist[\\/]index\.cjs$/i.test(process.argv[1] || "") ||
+    (typeof __filename !== "undefined" && /[\\/]dist[\\/]index\.cjs$/i.test(__filename)) ||
+    fs.existsSync(path.resolve(__dirname, "public", "index.html"));
   if (process.env.NODE_ENV === "production" || isBuiltServer) {
     serveStatic(app);
   } else {
