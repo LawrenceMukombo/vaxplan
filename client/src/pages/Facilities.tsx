@@ -2267,7 +2267,7 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
         return (
           <div className="text-xs space-y-0.5">
             {((route.transportMode || item.transportMode || "").toLowerCase() === "motorbike") && (
-              <p className="font-semibold text-primary">🏍️ {route.motorbikeTimeMinutes ?? Math.max(1, Math.round((route.distanceToFacility / 25) * 60))}m motorbike (ETT)</p>
+              <p className="font-semibold text-primary">🏍️ {route.motorbikeTimeMinutes ?? Math.max(1, Math.round((route.distanceToFacility / 25) * 60))}m motorbike</p>
             )}
             <p className={((route.transportMode || item.transportMode || "").toLowerCase() === "driving" || (route.transportMode || item.transportMode || "").toLowerCase() === "vehicle") ? "font-semibold text-primary" : "text-foreground"}>🚗 {route.drivingTimeMinutes}m drive</p>
             {((route.transportMode || item.transportMode || "").toLowerCase() !== "motorbike") && (
@@ -3756,7 +3756,7 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
                                               </Badge>
                                               <span className="text-[11px] text-muted-foreground flex items-center gap-1.5 flex-wrap">
                                                 {((route.transportMode || village.transportMode || "").toLowerCase() === "motorbike") ? (
-                                                  <span className="font-semibold text-primary">🏍️ {route.motorbikeTimeMinutes ?? Math.max(1, Math.round((route.distanceToFacility / 25) * 60))}m (ETT)</span>
+                                                  <span className="font-semibold text-primary">🏍️ {route.motorbikeTimeMinutes ?? Math.max(1, Math.round((route.distanceToFacility / 25) * 60))}m motorbike</span>
                                                 ) : (
                                                   <span>🏍️ {route.motorbikeTimeMinutes ?? Math.max(1, Math.round((route.distanceToFacility / 25) * 60))}m</span>
                                                 )}
@@ -3788,7 +3788,7 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
                                                   ? "bg-primary/15 text-primary border-primary/30 font-semibold"
                                                   : "bg-secondary text-secondary-foreground border-transparent"
                                               }`}>
-                                                {(route.transportMode || village.transportMode || "").toLowerCase() === "motorbike" ? "🏍️ Motorbike (ETT)" : route.transportMode}
+                                                {(route.transportMode || village.transportMode || "").toLowerCase() === "motorbike" ? "🏍️ Motorbike" : route.transportMode}
                                               </span>
                                             </div>
                                             {route.referralRoute && (
