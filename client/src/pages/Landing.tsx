@@ -46,7 +46,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PageHead } from "@/components/PageHead";
-import { versionLabel } from "@/lib/version";
+import { versionLabel, APP_VERSION } from "@/lib/version";
 import { getDomainLinks } from "@/lib/navigation";
 import { saveTenantsCache, loadTenantsCache, saveActiveTenant, loadActiveTenant, DEFAULT_CANONICAL_TENANTS } from "@/lib/tenantCache";
 import { clearLogoutState, recordOnlineAuthSession } from "@/lib/authSession";
@@ -362,9 +362,14 @@ function PasswordLoginDialog({
                 programs — from the capital down to the last village.
               </p>
             </div>
-            <div className="relative flex items-center gap-2 text-xs text-white/80">
-              <Shield className="h-4 w-4" />
-              Encrypted · Audit-logged · Per-country data isolation
+            <div className="relative flex items-center justify-between text-xs text-white/80 pt-3 border-t border-white/10">
+              <div className="flex items-center gap-2">
+                <Shield className="h-4 w-4 shrink-0" />
+                <span>Encrypted · Audit-logged · Isolated</span>
+              </div>
+              <span className="font-mono text-[11px] text-white/90 bg-white/15 px-2 py-0.5 rounded-full border border-white/20">
+                v{APP_VERSION}
+              </span>
             </div>
           </div>
 
@@ -480,12 +485,22 @@ function PasswordLoginDialog({
                     {busy ? "Signing in…" : "Sign in"}
                   </Button>
                 </form>
-                <p className="mt-6 text-center text-sm text-muted-foreground">
-                  Need access?{" "}
-                  <a href="/signup" className="text-primary font-medium hover:underline">
-                    Request an account
-                  </a>
-                </p>
+                <div className="mt-6 pt-4 border-t text-center text-xs text-muted-foreground space-y-2">
+                  <p>
+                    Need access?{" "}
+                    <a href="/signup" className="text-primary font-medium hover:underline">
+                      Request an account
+                    </a>
+                  </p>
+                  <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground/75 pt-1">
+                    <span className="inline-flex items-center gap-1.5 font-mono bg-muted/60 px-2 py-0.5 rounded border border-border/50 text-foreground/80">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                      App v{APP_VERSION}
+                    </span>
+                    <span>·</span>
+                    <span>Multi-Tenant Health Microplanning</span>
+                  </div>
+                </div>
               </>
             ) : (
               <>

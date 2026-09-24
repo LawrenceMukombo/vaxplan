@@ -443,7 +443,9 @@ export function registerCommunityRoutes(app: Express) {
   app.get("/api/villages/:id", ...auth, async (req: any, res) => {
     try {
       const dbUser = req.dbUser!;
-      const village = await storage.getVillage(req.tenantId, parseInt(req.params.id));
+      const villageId = parseInt(req.params.id, 10);
+      if (isNaN(villageId)) return res.status(400).json({ message: "Invalid village ID" });
+      const village = await storage.getVillage(req.tenantId, villageId);
       if (!village) return res.status(404).json({ message: "Village not found" });
       if (
         !(await userCanAccessGeo(dbUser, req.tenantId, {
@@ -1076,7 +1078,8 @@ export function registerCommunityRoutes(app: Express) {
 
   app.patch("/api/villages/:id", ...auth, async (req: any, res) => {
     try {
-      const entityId = parseInt(req.params.id);
+      const entityId = parseInt(req.params.id, 10);
+      if (isNaN(entityId)) return res.status(400).json({ message: "Invalid village ID" });
       const oldVillage = await storage.getVillage(req.tenantId, entityId);
       if (!oldVillage) return res.status(404).json({ message: "Village not found" });
 

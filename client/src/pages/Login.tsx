@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PageHead } from "@/components/PageHead";
+import { APP_VERSION, BUILD_TIME, formatBuildTime } from "@/lib/version";
 import { saveTenantsCache, loadTenantsCache, saveActiveTenant, loadActiveTenant, DEFAULT_CANONICAL_TENANTS } from "@/lib/tenantCache";
 import {
   clearLogoutState,
@@ -55,6 +56,23 @@ export default function LoginPage() {
   const [keepMeSignedIn, setKeepMeSignedIn] = useState(false);
   const [cachedAccounts, setCachedAccounts] = useState<{ email: string; name?: string; tenantId?: string | null }[]>([]);
   const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
+
+  const { data: versionInfo } = useQuery<{ version: string; buildTime: string }>({
+    queryKey: ["/api/version"],
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/version");
+        if (res.ok) return await res.json();
+      } catch {
+        // offline fallback
+      }
+      return { version: APP_VERSION, buildTime: BUILD_TIME };
+    },
+    staleTime: 1000 * 60 * 15,
+  });
+
+  const displayVersion = versionInfo?.version || APP_VERSION;
+  const buildDateStr = versionInfo?.buildTime ? formatBuildTime(versionInfo.buildTime) : formatBuildTime(BUILD_TIME);
 
   useEffect(() => {
     // Clear any stale pending logout flag so the user is never trapped
@@ -276,7 +294,12 @@ export default function LoginPage() {
             <HeartPulse className="h-5 w-5" />
           </div>
           <div className="flex flex-col leading-tight">
-            <span className="font-semibold text-sm">VaxPlan</span>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-sm">VaxPlan</span>
+              <span className="font-mono text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20">
+                v{displayVersion}
+              </span>
+            </div>
             <span className="text-[10px] text-muted-foreground">
               Health microplanning for Ministries
             </span>
@@ -326,9 +349,16 @@ export default function LoginPage() {
                 programs — from the capital down to the last village.
               </p>
             </div>
-            <div className="relative flex items-center gap-2 text-xs text-white/80">
-              <Shield className="h-4 w-4" />
-              Encrypted · Audit-logged · Country-isolated
+            <div className="relative flex flex-col gap-1.5 text-xs text-white/80 pt-4 border-t border-white/10">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Shield className="h-4 w-4 shrink-0" />
+                  <span>Encrypted · Audit-logged · Country-isolated</span>
+                </div>
+                <span className="font-mono text-[11px] text-white/90 bg-white/15 px-2 py-0.5 rounded-full border border-white/20">
+                  v{displayVersion}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -494,6 +524,14 @@ export default function LoginPage() {
                       Request access
                     </a>
                   </p>
+                  <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground/75 pt-1">
+                    <span className="inline-flex items-center gap-1.5 font-mono bg-muted/60 px-2 py-0.5 rounded border border-border/50 text-foreground/80">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                      App v{displayVersion}
+                    </span>
+                    <span>·</span>
+                    <span className="font-sans">Release {buildDateStr.split(" ")[0]}</span>
+                  </div>
                 </div>
               </>
             ) : (
@@ -561,8 +599,18 @@ export default function LoginPage() {
       </main>
 
       {/* Footer */}
-      <footer className="py-4 text-center text-xs text-muted-foreground">
-        © {new Date().getFullYear()} VaxPlan · Multi-Tenant Health Microplanning Platform
+      <footer className="py-4 text-center text-xs text-muted-foreground flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 px-4">
+        <span>© {new Date().getFullYear()} VaxPlan · Multi-Tenant Health Microplanning Platform</span>
+        <span className="hidden sm:inline opacity-30">•</span>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 font-mono text-[11px] px-2.5 py-0.5 rounded-full bg-background border border-border/70 text-foreground shadow-2xs">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+            v{displayVersion}
+          </span>
+          <span className="text-[11px] text-muted-foreground font-mono">
+            ({buildDateStr})
+          </span>
+        </div>
       </footer>
     </div>
   );
