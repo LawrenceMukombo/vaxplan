@@ -1,6 +1,6 @@
 import { useLocation, Link } from "wouter";
 import { useState, useEffect } from "react";
-import { versionLabel } from "@/lib/version";
+import { versionLabel, APP_VERSION, formatBuildTime } from "@/lib/version";
 import {
   Sidebar,
   SidebarContent,
@@ -474,7 +474,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
     <Sidebar collapsible="icon">
       <SidebarHeader className={isCollapsed ? "p-2 flex flex-col items-center justify-center gap-2" : "p-3 border-b border-sidebar-border/40"}>
         {isCollapsed ? (
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-sky-600 to-sky-700 text-white shadow-md shadow-primary/30 ring-1 ring-white/20 shrink-0" title="VaxPlan">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-sky-600 to-sky-700 text-white shadow-md shadow-primary/30 ring-1 ring-white/20 shrink-0" title={`VaxPlan v${APP_VERSION}`}>
             <HeartPulse className="h-4 w-4" />
           </div>
         ) : (
@@ -484,7 +484,12 @@ export function AppSidebar({ user }: AppSidebarProps) {
                 <HeartPulse className="h-5 w-5" />
               </div>
               <div className="flex flex-col min-w-0">
-                <span className="font-bold text-sm truncate leading-tight tracking-tight" data-testid="text-brand-name">VaxPlan</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-sm truncate leading-tight tracking-tight" data-testid="text-brand-name">VaxPlan</span>
+                  <span className="font-mono text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20 shrink-0">
+                    v{APP_VERSION}
+                  </span>
+                </div>
                 <span className="text-[11px] text-muted-foreground truncate leading-tight" data-testid="text-tenant-name">
                   {tenant?.name ?? "Health Microplanning"}
                 </span>

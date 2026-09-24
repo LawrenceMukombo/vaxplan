@@ -1123,10 +1123,19 @@ export default function Settings() {
     <div className="p-6 space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-border/40">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Settings Panel</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight">Settings Panel</h1>
+            <span className="inline-flex items-center gap-1.5 font-mono text-xs px-2.5 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+              v{APP_VERSION}
+            </span>
+          </div>
           <p className="text-muted-foreground text-sm">
             Manage your account profiles, country microplanning indicators, and GIS boundary datasets
           </p>
+        </div>
+        <div className="text-xs text-muted-foreground font-mono bg-muted/50 px-3 py-1.5 rounded-lg border border-border/40 shrink-0">
+          Build: {formatBuildTime()}
         </div>
       </div>
 

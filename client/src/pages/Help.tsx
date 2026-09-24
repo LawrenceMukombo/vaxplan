@@ -43,6 +43,7 @@ import { useLocation } from "wouter";
 import type { Tenant } from "@shared/schema";
 import { useState } from "react";
 import UserGuideSection from "@/components/UserGuideSection";
+import { APP_VERSION, formatBuildTime } from "@/lib/version";
 
 /* Original defaultFaqs array commented out for backward-compatibility and to satisfy Rule 2:
 const defaultFaqs = [
@@ -854,11 +855,22 @@ export default function Help() {
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Help & Support Hub</h1>
-        <p className="text-muted-foreground text-sm">
-          Find answers, review guides, access external WHO resources, and get assistance with VaxPlan
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-border/40">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold">Help & Support Hub</h1>
+            <span className="inline-flex items-center gap-1.5 font-mono text-xs px-2.5 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+              v{APP_VERSION}
+            </span>
+          </div>
+          <p className="text-muted-foreground text-sm">
+            Find answers, review guides, access external WHO resources, and get assistance with VaxPlan
+          </p>
+        </div>
+        <div className="text-xs text-muted-foreground font-mono bg-muted/50 px-3 py-1.5 rounded-lg border border-border/40 shrink-0">
+          Build: {formatBuildTime()}
+        </div>
       </div>
 
       <UserGuideSection

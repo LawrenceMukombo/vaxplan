@@ -33,6 +33,7 @@ import { TenantSwitcher } from "@/components/TenantSwitcher";
 import { InstallPrompt } from "@/components/InstallPrompt";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { OfflineBanner } from "@/components/OfflineBanner";
+import { APP_VERSION } from "@/lib/version";
 import { useUnmappedAntigenWarnings } from "@/hooks/useUnmappedAntigenWarnings";
 import { useProximityConflictWarnings } from "@/hooks/useProximityConflictWarnings";
 import { HeartPulse, ShieldCheck } from "lucide-react";
@@ -611,6 +612,14 @@ function AuthenticatedLayout() {
                 <SyncStatus />
                 <OnlinePresence />
                 <ThemeToggle />
+                <span
+                  className="hidden sm:inline-flex items-center gap-1.5 font-mono text-[11px] px-2 py-0.5 rounded-full bg-muted/60 border border-border/60 text-muted-foreground font-medium"
+                  title={`VaxPlan v${APP_VERSION}`}
+                  data-testid="badge-app-version"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                  v{APP_VERSION}
+                </span>
                 <UserMenu user={user} />
               </div>
             </header>

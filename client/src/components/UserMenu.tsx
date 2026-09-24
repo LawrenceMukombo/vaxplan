@@ -7,13 +7,22 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, Settings, KeyRound } from "lucide-react";
+import { LogOut, User, Settings, KeyRound, Info, HeartPulse, ShieldCheck, CheckCircle2 } from "lucide-react";
 import type { User as UserType } from "@shared/schema";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
 import { performClientLogout } from "@/lib/logout";
+import { APP_VERSION, formatBuildTime, BUILD_TIME } from "@/lib/version";
 
 interface UserMenuProps {
   user: UserType;
@@ -21,6 +30,7 @@ interface UserMenuProps {
 
 export function UserMenu({ user }: UserMenuProps) {
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [, setLocation] = useLocation();
   const initials = [user.firstName, user.lastName]
     .filter(Boolean)
@@ -91,21 +101,90 @@ export function UserMenu({ user }: UserMenuProps) {
           <KeyRound className="mr-2 h-4 w-4" />
           Change password
         </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={(e) => {
+            e.preventDefault();
+            setAboutOpen(true);
+          }}
+          className="cursor-pointer"
+          data-testid="menu-item-about-vaxplan"
+        >
+          <Info className="mr-2 h-4 w-4" />
+          About VaxPlan
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onSelect={(event) => {
             event.preventDefault();
             void performClientLogout({ reason: "manual_logout" });
           }}
-          className="cursor-pointer"
+          className="cursor-pointer text-destructive focus:text-destructive"
           data-testid="menu-item-logout"
         >
           <LogOut className="mr-2 h-4 w-4" />
           Log out
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <div className="px-2 py-1.5 text-center select-none bg-muted/30">
+          <div className="inline-flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+            VaxPlan v{APP_VERSION}
+          </div>
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
     <ChangePasswordDialog open={changePasswordOpen} onOpenChange={setChangePasswordOpen} />
+    
+    {/* About VaxPlan Modal */}
+    <Dialog open={aboutOpen} onOpenChange={setAboutOpen}>
+      <DialogContent className="sm:max-w-[440px] p-0 overflow-hidden">
+        <div className="p-6 bg-gradient-to-br from-primary/10 via-sky-500/5 to-background border-b border-border/50 text-center relative">
+          <div className="mx-auto w-12 h-12 rounded-2xl bg-gradient-to-br from-primary via-sky-600 to-sky-700 text-white flex items-center justify-center shadow-lg shadow-primary/25 ring-2 ring-white/20 mb-3">
+            <HeartPulse className="h-6 w-6" />
+          </div>
+          <DialogTitle className="text-xl font-bold tracking-tight">VaxPlan</DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+            Digital Microplanning & Geospatial Immunization Platform
+          </DialogDescription>
+          <div className="mt-3 inline-flex items-center gap-2 font-mono text-xs px-3 py-1 rounded-full bg-background/80 backdrop-blur border border-primary/20 text-primary shadow-xs">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="font-semibold">Version {APP_VERSION}</span>
+          </div>
+        </div>
+        <div className="p-6 space-y-4 text-xs">
+          <div className="space-y-2 rounded-xl bg-muted/40 p-3.5 border border-border/60">
+            <div className="flex justify-between items-center py-1 border-b border-border/40">
+              <span className="text-muted-foreground font-medium">Build Date & Time</span>
+              <span className="font-mono text-foreground font-semibold">{formatBuildTime()}</span>
+            </div>
+            <div className="flex justify-between items-center py-1 border-b border-border/40">
+              <span className="text-muted-foreground font-medium">Release Status</span>
+              <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
+                <CheckCircle2 className="h-3 w-3" /> Production Stable
+              </span>
+            </div>
+            <div className="flex justify-between items-center py-1 border-b border-border/40">
+              <span className="text-muted-foreground font-medium">Security & Storage</span>
+              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                <ShieldCheck className="h-3.5 w-3.5 text-primary" /> Multi-Tenant Isolated
+              </span>
+            </div>
+            <div className="flex justify-between items-center py-1">
+              <span className="text-muted-foreground font-medium">Geospatial Engine</span>
+              <span className="font-mono text-foreground font-semibold">PostgreSQL · PostGIS</span>
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground text-center leading-relaxed">
+            Built for Ministries of Health, Expanded Programmes on Immunization (EPI), and primary health care workers worldwide.
+          </p>
+        </div>
+        <DialogFooter className="p-4 bg-muted/20 border-t border-border flex justify-end">
+          <Button onClick={() => setAboutOpen(false)} size="sm" className="rounded-xl px-5">
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     </>
   );
 }

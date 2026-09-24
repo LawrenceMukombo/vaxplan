@@ -832,7 +832,12 @@ export default function Landing() {
               <HeartPulse className="h-5 w-5" />
             </div>
             <div className="flex flex-col">
-              <span className="font-semibold text-sm">VaxPlan</span>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-sm">VaxPlan</span>
+                <span className="font-mono text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20">
+                  v{APP_VERSION}
+                </span>
+              </div>
               <span className="text-xs text-muted-foreground">
                 Health microplanning for Ministries
               </span>
