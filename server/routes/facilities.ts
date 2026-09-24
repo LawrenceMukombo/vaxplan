@@ -429,6 +429,10 @@ export function registerFacilityRoutes(app: Express) {
         }
       }
 
+      // Filter out any administrative district boundaries (metropolitan municipality records)
+      const metroDistrictIds = new Set([253111, 253112, 253113, 253114, 253115, 253116, 253117, 253118]);
+      villagesToRoute = villagesToRoute.filter(v => !metroDistrictIds.has(Number(v.id)));
+
       const results = [];
       for (const village of villagesToRoute) {
         const vLat = village.latitude ? Number(village.latitude) : null;
@@ -466,6 +470,11 @@ export function registerFacilityRoutes(app: Express) {
         }
 
         const walkingMin = Math.round((roadDistanceKm / 5) * 60);
+        const transportMode = (village as any).transportMode || "walking";
+        // Motorbike travel time (ETT): ~25 km/h on rural/mixed terrain or saved travel time when mode is motorbike
+        const motorbikeMin = transportMode === "motorbike" && Number.isFinite(savedTravelMinutes) && savedTravelMinutes > 0
+          ? Math.round(savedTravelMinutes)
+          : Math.max(1, Math.round((roadDistanceKm / 25) * 60));
 
         // Derive accessibility score
         let accessibilityScore = (village as any).accessibilityScore;
@@ -483,7 +492,8 @@ export function registerFacilityRoutes(app: Express) {
           distanceToFacility: roadDistanceKm,
           drivingTimeMinutes: drivingMin,
           walkingTimeMinutes: walkingMin,
-          transportMode: (village as any).transportMode || "walking",
+          motorbikeTimeMinutes: motorbikeMin,
+          transportMode,
           accessibilityScore,
           routeGeometry: geometry,
           routeSource,

@@ -584,9 +584,13 @@ export function CatchmentMapPanel({
   const [showGuideModal, setShowGuideModal] = useState(false);
   const [showCommunityPins, setShowCommunityPins] = useState(true);
 
+  const effectiveCommunities = useMemo(() => {
+    return communities.filter((c) => !(c.villageId && c.villageId >= 253111 && c.villageId <= 253118));
+  }, [communities]);
+
   const selectedCommunityRecord = useMemo(() => {
-    return communities.find((c) => c.name === selectedCommunity);
-  }, [communities, selectedCommunity]);
+    return effectiveCommunities.find((c) => c.name === selectedCommunity);
+  }, [effectiveCommunities, selectedCommunity]);
 
   const selectedCommunityPolygon = useMemo(() => {
     return communityPolygons.find((p) => p.communityName === selectedCommunity);
@@ -657,7 +661,7 @@ export function CatchmentMapPanel({
         }
       }).catch(() => {});
 
-    communities.forEach((c) => {
+    effectiveCommunities.forEach((c) => {
       if (!c.villageId) return;
       apiRequest<any>("GET", `/api/villages/${c.villageId}/community-polygon`)
         .then((r) => {
@@ -665,6 +669,7 @@ export function CatchmentMapPanel({
           const coords = coordsFromGeoJson(display?.catchmentPolygon);
           if (coords) {
             const meta = metaFromResponse(display);
+            if (meta.areaSqKm && meta.areaSqKm > 100) return; // Prevent full district administrative shapefiles from rendering as community polygons
             setCommunityPolygons((prev) => {
               if (prev.some((p) => p.communityName === c.name)) return prev;
               return [...prev, {
@@ -1570,7 +1575,7 @@ export function CatchmentMapPanel({
                   <p className="font-bold text-sm text-foreground leading-tight">{facilityName}</p>
                 </div>
                 <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground pt-0.5">
-                  <span>Communities: <strong className="text-foreground">{communities.length}</strong></span>
+                  <span>Communities: <strong className="text-foreground">{effectiveCommunities.length}</strong></span>
                   {catchment?.gridPopulation ? (
                     <span>Catchment Pop: <strong className="text-foreground">{catchment.gridPopulation.toLocaleString()}</strong></span>
                   ) : null}
@@ -1581,7 +1586,7 @@ export function CatchmentMapPanel({
 
           {/* Community Settlement Location Pins */}
           {showCommunityPins &&
-            communities.map((c) => {
+            effectiveCommunities.map((c) => {
               if (c.latitude == null || c.longitude == null || isNaN(c.latitude) || isNaN(c.longitude)) return null;
               const poly = communityPolygons.find((p) => p.communityName === c.name);
               const isSelected = selectedCommunity === c.name;
@@ -1764,11 +1769,11 @@ export function CatchmentMapPanel({
       )}
 
       {/* ── Community Coverage Checklist ── */}
-      {communities.length > 0 && (
+      {effectiveCommunities.length > 0 && (
         <div className="rounded-xl border bg-card p-3.5 space-y-2.5 shadow-xs">
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              Community Coverage List ({communityPolygons.length}/{communities.length} Mapped)
+              Community Coverage List ({communityPolygons.length}/{effectiveCommunities.length} Mapped)
             </h4>
             {catchment && (
               <div className="flex items-center gap-2">
@@ -1795,7 +1800,7 @@ export function CatchmentMapPanel({
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {communities.map((c, i) => {
+            {effectiveCommunities.map((c, i) => {
               const poly = communityPolygons.find((p) => p.communityName === c.name);
               const isSelected = selectedCommunity === c.name;
               return (

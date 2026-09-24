@@ -108,6 +108,10 @@ import {
   toDateInputValue,
   isAtLeastDaysAhead,
 } from "@shared/schedulingDates";
+import {
+  formatHtrAssessmentComments,
+  parseBesdBarriersFromComments,
+} from "@shared/redMicroplanning";
 
 // --- Step metadata --------------------------------------------------------
 export type StepDef = {
@@ -848,6 +852,9 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               terrain: match.terrainScore ?? r.terrain,
               season: match.seasonalScore ?? r.season,
               insecurity: match.insecurityScore ?? r.insecurity,
+              missed: String(match.comments ?? "").includes("missed_12mo"),
+              zeroDose: String(match.comments ?? "").includes("zero_dose_hotspot"),
+              besdBarriers: parseBesdBarriersFromComments(match.comments),
             };
           })
         );
@@ -2094,6 +2101,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     insecurity: number;
     missed: boolean;
     zeroDose: boolean;
+    besdBarriers?: string[];
   };
   const [risk, setRisk] = useState<RiskRow[]>([]);
   useEffect(() => {
@@ -2131,6 +2139,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
           insecurity: (hit as any).insecurityScore ?? r.insecurity,
           missed: cm.includes("missed_12mo"),
           zeroDose: cm.includes("zero_dose_hotspot"),
+          besdBarriers: parseBesdBarriersFromComments(cm),
         };
       }),
     );
@@ -3487,10 +3496,10 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
             compositeScore: composite,
             interventionPriority:
               composite >= 70 ? "high" : composite >= 50 ? "medium" : "low",
-            comments:
-              [r.missed ? "missed_12mo" : null, r.zeroDose ? "zero_dose_hotspot" : null]
-                .filter(Boolean)
-                .join("; ") || null,
+            comments: formatHtrAssessmentComments(
+              [r.missed ? "missed_12mo" : "", r.zeroDose ? "zero_dose_hotspot" : ""],
+              r.besdBarriers ?? [],
+            ),
           });
         }
         if (items.length > 0) {

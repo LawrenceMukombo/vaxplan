@@ -7,9 +7,33 @@ import {
   calculateZeroDose,
   calculateRecommendedSessions,
   RED_CATEGORY_DEFINITIONS,
+  formatHtrAssessmentComments,
+  parseBesdBarriersFromComments,
 } from "../redMicroplanning";
 
 describe("RED planning calculations", () => {
+  describe("WHO BeSD HTR persistence", () => {
+    it("round-trips selected drivers alongside legacy risk flags", () => {
+      const comments = formatHtrAssessmentComments(
+        ["missed_12mo"],
+        ["safety_concerns", "long_distance"],
+      );
+
+      expect(comments).toBe("missed_12mo; besd:safety_concerns,long_distance");
+      expect(parseBesdBarriersFromComments(comments)).toEqual([
+        "safety_concerns",
+        "long_distance",
+      ]);
+    });
+
+    it("keeps old records compatible and ignores unknown driver ids", () => {
+      expect(parseBesdBarriersFromComments("zero_dose_hotspot")).toEqual([]);
+      expect(parseBesdBarriersFromComments("besd:misinformation,not_a_driver")).toEqual([
+        "misinformation",
+      ]);
+    });
+  });
+
   it("does not turn missing denominators or zero first doses into coverage", () => {
     const result = redMetrics("analysis", { first: 0, third: 0, infants: 0 });
     expect(result["First-dose coverage %"]).toBeNull();

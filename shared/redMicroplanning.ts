@@ -274,6 +274,40 @@ export const WHO_BESD_DOMAINS = [
   },
 ] as const;
 
+const WHO_BESD_OPTION_IDS = new Set(
+  WHO_BESD_DOMAINS.flatMap((domain) => domain.options.map((option) => option.id)),
+);
+
+/**
+ * Store the facility-level BeSD selection alongside the legacy HTR comment
+ * flags without requiring a destructive schema change. The option ids are
+ * controlled constants, so the compact comma-separated representation is
+ * stable and remains readable by older versions of the application.
+ */
+export function formatHtrAssessmentComments(
+  flags: string[],
+  besdBarriers: string[],
+): string | null {
+  const validBarriers = Array.from(new Set(besdBarriers)).filter((id) =>
+    WHO_BESD_OPTION_IDS.has(id as any),
+  );
+  const parts = flags.filter(Boolean);
+  if (validBarriers.length > 0) parts.push(`besd:${validBarriers.join(",")}`);
+  return parts.join("; ") || null;
+}
+
+export function parseBesdBarriersFromComments(comments: unknown): string[] {
+  if (typeof comments !== "string") return [];
+  const segment = comments
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("besd:"));
+  if (!segment) return [];
+  return Array.from(new Set(segment.slice(5).split(",")))
+    .map((id) => id.trim())
+    .filter((id) => WHO_BESD_OPTION_IDS.has(id as any));
+}
+
 /**
  * Integrated Child Health Interventions (WHO RED Ch 2 & IIP 2025 p. 211)
  */

@@ -1898,7 +1898,17 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
           </div>
           <div className="rounded-md bg-muted/40 p-2">
             <p className="text-[10px] uppercase text-muted-foreground font-semibold">Travel</p>
-            <p className="font-semibold">{route ? `${route.drivingTimeMinutes}m drive` : community.travelTimeMinutes ? `${community.travelTimeMinutes}m` : "-"}</p>
+            <p className="font-semibold">
+              {route ? (
+                route.transportMode === "motorbike" ? (
+                  `🏍️ ${route.motorbikeTimeMinutes ?? Math.max(1, Math.round(((route.distanceToFacility || 0) / 25) * 60))}m`
+                ) : route.transportMode === "walking" ? (
+                  `🚶 ${route.walkingTimeMinutes}m`
+                ) : (
+                  `🚗 ${route.drivingTimeMinutes}m`
+                )
+              ) : community.travelTimeMinutes ? `${community.travelTimeMinutes}m` : "-"}
+            </p>
           </div>
           <div className="rounded-md bg-muted/40 p-2">
             <p className="text-[10px] uppercase text-muted-foreground font-semibold">CHVs</p>
@@ -2256,8 +2266,15 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
         }
         return (
           <div className="text-xs space-y-0.5">
-            <p className="text-foreground">🚗 {route.drivingTimeMinutes}m drive</p>
-            <p className="text-muted-foreground">🚶 {route.walkingTimeMinutes}m walk</p>
+            {((route.transportMode || item.transportMode || "").toLowerCase() === "motorbike") && (
+              <p className="font-semibold text-primary">🏍️ {route.motorbikeTimeMinutes ?? Math.max(1, Math.round((route.distanceToFacility / 25) * 60))}m motorbike (ETT)</p>
+            )}
+            <p className={((route.transportMode || item.transportMode || "").toLowerCase() === "driving" || (route.transportMode || item.transportMode || "").toLowerCase() === "vehicle") ? "font-semibold text-primary" : "text-foreground"}>🚗 {route.drivingTimeMinutes}m drive</p>
+            {((route.transportMode || item.transportMode || "").toLowerCase() !== "motorbike") && (
+              <p className="text-muted-foreground">🏍️ {route.motorbikeTimeMinutes ?? Math.max(1, Math.round((route.distanceToFacility / 25) * 60))}m motorbike</p>
+            )}
+            <p className={((route.transportMode || item.transportMode || "").toLowerCase() === "walking") ? "font-semibold text-primary" : "text-muted-foreground"}>🚶 {route.walkingTimeMinutes}m walk</p>
+
           </div>
         );
       }
@@ -3704,12 +3721,22 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
                             </div>
 
                             <div className="border rounded-md divide-y overflow-y-auto max-h-[45vh] custom-scrollbar p-1.5 space-y-1.5 bg-muted/10">
-                              {(villages?.filter(v => v.assignedFacilityId === editingFacility?.id) || []).length === 0 ? (
-                                <div className="p-8 text-center text-muted-foreground text-sm">
-                                  No communities assigned. Click "Aggressive Centroid Extractor" above or "+ Add to Catchment" to assign existing district communities.
-                                </div>
-                              ) : (
-                                (villages?.filter(v => v.assignedFacilityId === editingFacility?.id) || []).map((village) => {
+                              {(() => {
+                                const metroDistrictIds = new Set([253111, 253112, 253113, 253114, 253115, 253116, 253117, 253118]);
+                                const assigned = (villages || []).filter(v => 
+                                  v.assignedFacilityId === editingFacility?.id && 
+                                  !metroDistrictIds.has(Number(v.id)) &&
+                                  v.name?.trim().toLowerCase() !== "ethekwini" &&
+                                  v.name?.trim().toLowerCase() !== (editingFacility?.name || "").trim().toLowerCase()
+                                );
+                                if (assigned.length === 0) {
+                                  return (
+                                    <div className="p-8 text-center text-muted-foreground text-sm">
+                                      No communities assigned. Click "Aggressive Centroid Extractor" above or "+ Add to Catchment" to assign existing district communities.
+                                    </div>
+                                  );
+                                }
+                                return assigned.map((village) => {
                                   const route = editingFacilityRoutes?.find((r: any) => r.villageId === village.id);
                                   return (
                                     <div key={village.id} className="p-3.5 flex items-start justify-between hover:bg-muted/40 transition-all rounded-lg border border-transparent hover:border-muted-foreground/15 bg-background shadow-sm">
@@ -3727,10 +3754,20 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
                                               <Badge variant="outline" className="font-semibold text-foreground bg-background/50 border-primary/10">
                                                 {route.distanceToFacility.toFixed(2)} km
                                               </Badge>
-                                              <span className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-                                                <span>🚗 {route.drivingTimeMinutes}m</span>
+                                              <span className="text-[11px] text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                                                {((route.transportMode || village.transportMode || "").toLowerCase() === "motorbike") ? (
+                                                  <span className="font-semibold text-primary">🏍️ {route.motorbikeTimeMinutes ?? Math.max(1, Math.round((route.distanceToFacility / 25) * 60))}m (ETT)</span>
+                                                ) : (
+                                                  <span>🏍️ {route.motorbikeTimeMinutes ?? Math.max(1, Math.round((route.distanceToFacility / 25) * 60))}m</span>
+                                                )}
                                                 <span className="opacity-50">|</span>
-                                                <span>🚶 {route.walkingTimeMinutes}m</span>
+                                                <span className={((route.transportMode || village.transportMode || "").toLowerCase() === "driving" || (route.transportMode || village.transportMode || "").toLowerCase() === "vehicle") ? "font-semibold text-primary" : ""}>
+                                                  🚗 {route.drivingTimeMinutes}m
+                                                </span>
+                                                <span className="opacity-50">|</span>
+                                                <span className={((route.transportMode || village.transportMode || "").toLowerCase() === "walking") ? "font-semibold text-primary" : ""}>
+                                                  🚶 {route.walkingTimeMinutes}m
+                                                </span>
                                               </span>
                                             </div>
                                             <div className="flex items-center gap-1.5 flex-wrap">
@@ -3746,8 +3783,12 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
                                                   {route.seasonalAccessibility}
                                                 </span>
                                               )}
-                                              <span className="text-[10px] font-medium bg-secondary text-secondary-foreground border border-transparent px-2 py-0.5 rounded-full capitalize">
-                                                {route.transportMode}
+                                              <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full capitalize border ${
+                                                (route.transportMode || village.transportMode || "").toLowerCase() === "motorbike"
+                                                  ? "bg-primary/15 text-primary border-primary/30 font-semibold"
+                                                  : "bg-secondary text-secondary-foreground border-transparent"
+                                              }`}>
+                                                {(route.transportMode || village.transportMode || "").toLowerCase() === "motorbike" ? "🏍️ Motorbike (ETT)" : route.transportMode}
                                               </span>
                                             </div>
                                             {route.referralRoute && (
@@ -3785,11 +3826,11 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
                                       </div>
                                     </div>
                                   );
-                                })
-                              )}
-                            </div>
-                          </div>
+                                  });
+                                })()}
+                              </div>
                         </div>
+                            </div>
 
                         {/* Interactive Leaflet Sub-Map showing community pins */}
                         <div className="relative h-full bg-muted/20">
