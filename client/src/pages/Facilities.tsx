@@ -2773,7 +2773,9 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
               <Send className="h-4 w-4 text-purple-600" />
               Outreach Posts
               {(() => {
-                const count = (villages || []).filter((v) => v.outreachLatitude && v.outreachLongitude).length;
+                const count = filteredVillages.filter(
+                  (v) => v.outreachLatitude && v.outreachLongitude,
+                ).length;
                 return count > 0 ? (
                   <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full font-semibold bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30">
                     {count}
