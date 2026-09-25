@@ -42,6 +42,7 @@ import {
   FileText,
   Pencil,
   RotateCcw,
+  Mail,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -492,6 +493,16 @@ function PasswordLoginDialog({
                       Request an account
                     </a>
                   </p>
+                  <p className="text-[11px] text-muted-foreground/90">
+                    Want a free demo? Email{" "}
+                    <a href="mailto:info@vaxplan.org?subject=Free%20VaxPlan%20Demo%20Request" className="text-primary hover:underline">
+                      info@vaxplan.org
+                    </a>{" "}
+                    or{" "}
+                    <a href="mailto:vaxplan@gmail.com?subject=Free%20VaxPlan%20Demo%20Request" className="text-primary hover:underline">
+                      vaxplan@gmail.com
+                    </a>
+                  </p>
                   <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground/75 pt-1">
                     <span className="inline-flex items-center gap-1.5 font-mono bg-muted/60 px-2 py-0.5 rounded border border-border/50 text-foreground/80">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
@@ -568,6 +579,90 @@ function PasswordLoginDialog({
   );
 }
 
+export function FreeDemoDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+            <HeartPulse className="h-5 w-5 text-primary" />
+            Request a Free Demonstration
+          </DialogTitle>
+          <DialogDescription className="text-sm pt-1">
+            Connect directly with the VaxPlan technical team for a personalized walk-through, tailored sandbox demonstration, or country pilot consultation.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="rounded-xl border bg-muted/40 p-4 space-y-3">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Official Demo Request Inboxes
+            </div>
+            <div className="space-y-2">
+              <a
+                href="mailto:info@vaxplan.org?subject=Free%20VaxPlan%20Demo%20Request&body=Hello%20VaxPlan%20Team%2C%0A%0AWe%20would%20like%20to%20request%20a%20free%20demonstration%20of%20VaxPlan.%0A%0AOrganization%3A%20%0ACountry%2FRegion%3A%20%0AContact%20Name%3A%20%0APreferred%20Date%20or%20Focus%20Area%3A%20%0A%0AThank%20you!"
+                className="flex items-center justify-between p-3 rounded-lg border bg-background hover:border-primary hover:shadow-sm transition-all group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
+                    <Mail className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold group-hover:text-primary transition-colors">
+                      info@vaxplan.org
+                    </div>
+                    <div className="text-xs text-muted-foreground">Primary Institutional Inbox</div>
+                  </div>
+                </div>
+                <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
+              </a>
+
+              <a
+                href="mailto:vaxplan@gmail.com?subject=Free%20VaxPlan%20Demo%20Request&body=Hello%20VaxPlan%20Team%2C%0A%0AWe%20would%20like%20to%20request%20a%20free%20demonstration%20of%20VaxPlan.%0A%0AOrganization%3A%20%0ACountry%2FRegion%3A%20%0AContact%20Name%3A%20%0APreferred%20Date%20or%20Focus%20Area%3A%20%0A%0AThank%20you!"
+                className="flex items-center justify-between p-3 rounded-lg border bg-background hover:border-emerald-600 hover:shadow-sm transition-all group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
+                    <Mail className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold group-hover:text-emerald-600 transition-colors">
+                      vaxplan@gmail.com
+                    </div>
+                    <div className="text-xs text-muted-foreground">Direct Technical &amp; Field Coordination</div>
+                  </div>
+                </div>
+                <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-emerald-600 group-hover:translate-x-0.5 transition-all" />
+              </a>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <a
+              href="/demo"
+              className="flex items-center justify-center gap-1.5 p-2.5 rounded-lg border bg-background hover:bg-muted font-medium text-center transition-colors"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-blue-500" />
+              Interactive Guided Demo
+            </a>
+            <a
+              href="/partners#contact"
+              className="flex items-center justify-center gap-1.5 p-2.5 rounded-lg border bg-background hover:bg-muted font-medium text-center transition-colors"
+            >
+              <Building2 className="h-3.5 w-3.5 text-emerald-500" />
+              Partnership Proposal
+            </a>
+          </div>
+        </div>
+
+        <div className="text-xs text-muted-foreground text-center border-t pt-3">
+          Our team typically responds within 24 business hours to arrange a live session or sandbox access.
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function TenantCard({ tenant, onSelect }: { tenant: PublicTenant; onSelect?: (tenantId: string) => void }) {
   return (
     <Card
@@ -631,6 +726,7 @@ export default function Landing() {
     }
     return false;
   });
+  const [demoDialogOpen, setDemoDialogOpen] = useState(false);
   const { researchUrl, docsUrl } = getDomainLinks();
 
   const [personaStories, setPersonaStories] = useState<Record<"chw" | "facility" | "manager", PersonaStory>>(() => {
@@ -728,6 +824,7 @@ export default function Landing() {
         image="/og-card.png"
       />
       <PasswordLoginDialog open={loginOpen} onOpenChange={setLoginOpen} tenants={activeTenantsList} />
+      <FreeDemoDialog open={demoDialogOpen} onOpenChange={setDemoDialogOpen} />
 
       {/* Edit Story Dialog */}
       {isAdmin && (
@@ -846,8 +943,11 @@ export default function Landing() {
 
           <div className="flex items-center gap-3">
             <ThemeToggle />
-            <a href={researchUrl} className="text-sm font-medium hover:underline text-muted-foreground">Research</a>
-            <a href={docsUrl} className="text-sm font-medium hover:underline text-muted-foreground">Docs</a>
+            <a href={researchUrl} className="text-sm font-medium hover:underline text-muted-foreground hidden lg:inline-block">Research</a>
+            <a href={docsUrl} className="text-sm font-medium hover:underline text-muted-foreground hidden lg:inline-block">Docs</a>
+            <Button variant="ghost" size="sm" onClick={() => setDemoDialogOpen(true)} className="text-primary font-medium hover:text-primary">
+              Free Demo
+            </Button>
             <Button variant="outline" asChild data-testid="button-request-access">
               <a href="/signup">Request access</a>
             </Button>
@@ -919,8 +1019,11 @@ export default function Landing() {
               <Button size="lg" variant="secondary" asChild>
                 <a href="#roles">For Health Workers &amp; Managers</a>
               </Button>
+              <Button size="lg" variant="default" className="font-semibold" onClick={() => setDemoDialogOpen(true)}>
+                Request a Free Demo
+              </Button>
               <Button size="lg" variant="outline" onClick={() => setLoginOpen(true)}>
-                Request Demo / Sign In
+                Sign In
               </Button>
             </div>
 
@@ -1768,9 +1871,22 @@ export default function Landing() {
               <Button size="lg" variant="secondary" className="w-full sm:w-auto text-primary" onClick={() => setLoginOpen(true)}>
                 Explore Dashboard
               </Button>
+              <Button size="lg" variant="default" className="w-full sm:w-auto bg-white text-primary hover:bg-white/90 font-semibold shadow-sm" onClick={() => setDemoDialogOpen(true)}>
+                Request a Free Demo
+              </Button>
               <Button size="lg" variant="outline" className="w-full sm:w-auto bg-transparent border-primary-foreground/20 hover:bg-primary-foreground/10 text-primary-foreground" asChild>
                 <a href="/signup">Integrate VaxPlan</a>
               </Button>
+            </div>
+            <div className="mt-8 pt-6 border-t border-primary-foreground/20 flex flex-wrap items-center justify-center gap-4 text-xs text-primary-foreground/90">
+              <span className="font-semibold text-primary-foreground">Direct Free Demo Inquiries:</span>
+              <a href="mailto:info@vaxplan.org?subject=Free%20VaxPlan%20Demo%20Request" className="underline hover:text-white font-medium flex items-center gap-1.5">
+                <Mail className="h-3.5 w-3.5" /> info@vaxplan.org
+              </a>
+              <span>·</span>
+              <a href="mailto:vaxplan@gmail.com?subject=Free%20VaxPlan%20Demo%20Request" className="underline hover:text-white font-medium flex items-center gap-1.5">
+                <Mail className="h-3.5 w-3.5" /> vaxplan@gmail.com
+              </a>
             </div>
           </div>
         </section>
@@ -1793,6 +1909,15 @@ export default function Landing() {
               <span>VaxPlan · Health Microplanning Platform</span>
             </div>
             <div className="flex flex-wrap items-center justify-center md:justify-end gap-4 text-xs">
+              <button onClick={() => setDemoDialogOpen(true)} className="text-primary hover:underline font-semibold cursor-pointer">
+                Request Free Demo
+              </button>
+              <a href="/demo" className="text-primary hover:underline font-medium">
+                Live Demo
+              </a>
+              <a href="/partners#contact" className="text-primary hover:underline font-medium">
+                Partnerships
+              </a>
               <a href="#features" className="text-primary hover:underline font-medium">
                 Features
               </a>
@@ -1806,22 +1931,27 @@ export default function Landing() {
                 Help Center
               </a>
               <a
-                href="/help"
-                className="text-primary hover:underline"
-                data-testid="link-footer-help"
-              >
-                Help &amp; User Guide
-              </a>
-              <a
                 href="/data-sources"
                 className="text-primary hover:underline font-medium"
                 data-testid="link-footer-data-sources"
               >
                 Data Sources
               </a>
-              <span className="hidden lg:inline text-muted-foreground ml-2">
-                Built for national immunization programs · Multi-tenant SaaS
-              </span>
+            </div>
+          </div>
+          <div className="mt-4 pt-4 border-t flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-foreground">Free Demo Requests:</span>
+              <a href="mailto:info@vaxplan.org?subject=Free%20VaxPlan%20Demo%20Request" className="text-primary hover:underline font-medium">
+                info@vaxplan.org
+              </a>
+              <span>·</span>
+              <a href="mailto:vaxplan@gmail.com?subject=Free%20VaxPlan%20Demo%20Request" className="text-primary hover:underline font-medium">
+                vaxplan@gmail.com
+              </a>
+            </div>
+            <div className="text-[11px] text-muted-foreground/80">
+              Built for national immunization programs · Multi-tenant SaaS
             </div>
           </div>
           <div className="mt-3 text-center text-[11px] text-muted-foreground/80" data-testid="landing-version">

@@ -419,6 +419,19 @@ export default function Signup() {
                   </Button>
                 </form>
               </Form>
+              <div className="pt-4 border-t text-center text-xs text-muted-foreground space-y-1">
+                <p className="font-medium text-foreground">Interested in a platform demonstration first?</p>
+                <p>
+                  Request a free demo by emailing{" "}
+                  <a href="mailto:info@vaxplan.org?subject=Free%20VaxPlan%20Demo%20Request" className="text-primary hover:underline font-semibold">
+                    info@vaxplan.org
+                  </a>{" "}
+                  or{" "}
+                  <a href="mailto:vaxplan@gmail.com?subject=Free%20VaxPlan%20Demo%20Request" className="text-primary hover:underline font-semibold">
+                    vaxplan@gmail.com
+                  </a>
+                </p>
+              </div>
             </CardContent>
           </Card>
         )}

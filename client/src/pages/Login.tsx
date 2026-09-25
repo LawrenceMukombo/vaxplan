@@ -524,6 +524,16 @@ export default function LoginPage() {
                       Request access
                     </a>
                   </p>
+                  <p className="text-[11px] text-muted-foreground/90">
+                    Want a free demo? Email{" "}
+                    <a href="mailto:info@vaxplan.org?subject=Free%20VaxPlan%20Demo%20Request" className="text-primary hover:underline">
+                      info@vaxplan.org
+                    </a>{" "}
+                    or{" "}
+                    <a href="mailto:vaxplan@gmail.com?subject=Free%20VaxPlan%20Demo%20Request" className="text-primary hover:underline">
+                      vaxplan@gmail.com
+                    </a>
+                  </p>
                   <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground/75 pt-1">
                     <span className="inline-flex items-center gap-1.5 font-mono bg-muted/60 px-2 py-0.5 rounded border border-border/50 text-foreground/80">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
