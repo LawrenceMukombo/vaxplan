@@ -20,6 +20,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { MapContainer, CircleMarker, Popup, useMap } from "react-leaflet";
 import { latLngBounds } from "leaflet";
+import { DataTable } from "@/components/DataTable";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 import {
   BasemapSwitcher,
@@ -462,93 +463,93 @@ export default function ZeroDoseVillages() {
               </Button>
             </div>
           </CardHeader>
-          <CardContent className="p-0">
-            <div className="h-[500px] overflow-auto">
-              {isLoading ? (
-                <div className="p-4 space-y-2">
-                  {[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
-                </div>
-              ) : filtered.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-muted-foreground text-sm p-4 text-center">
-                  No villages have {mode === "zero" ? "zero-dose" : "under-immunized"} children for this filter.
-                </div>
-              ) : (
-                <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-card border-b border-border">
-                    <tr className="text-left">
-                      <th className="p-2 w-8"></th>
-                      <th className="p-2">Village</th>
-                      <th className="p-2">Facility · District</th>
-                      <th className="p-2 text-right">
-                        {mode === "zero" ? "Zero-dose" : "Under-imm."}
-                      </th>
-                      <th className="p-2 text-right">%</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((r) => {
-                      const n = countFor(r);
-                      const pct = mode === "zero" ? r.pct : r.underImmunizedPct;
-                      const canSelect = r.villageId != null;
-                      const isSelected = canSelect && selected.has(r.villageId!);
-                      return (
-                        <tr
-                          key={`${r.villageId ?? "f" + r.facilityId}`}
-                          className={`border-b border-border/50 hover:bg-secondary/40 ${isSelected ? (mode === "zero" ? "bg-rose-500/5" : "bg-amber-500/5") : ""}`}
-                          data-testid={`row-village-${r.villageId ?? "f" + r.facilityId}`}
-                        >
-                          <td className="p-2">
-                            {canSelect ? (
-                              <Checkbox
-                                checked={isSelected}
-                                onCheckedChange={() => toggleSelect(r.villageId)}
-                                data-testid={`checkbox-village-${r.villageId}`}
-                              />
-                            ) : (
-                              <span
-                                className="text-[10px] text-muted-foreground"
-                                title="Facility-level rollup — no specific village to target"
-                              >
-                                —
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-2">
-                            <div className="font-medium flex items-center gap-1">
-                              {r.latitude != null && r.longitude != null && (
-                                <MapPin className="h-3 w-3 text-muted-foreground" />
-                              )}
-                              {r.villageName}
-                            </div>
-                            {r.isHardToReach && (
-                              <Badge
-                                variant="secondary"
-                                className="bg-amber-500/10 text-amber-700 text-[10px] mt-0.5"
-                              >
-                                HTR
-                              </Badge>
-                            )}
-                          </td>
-                          <td className="p-2 text-muted-foreground">
-                            <div>{r.facilityName}</div>
-                            <div className="text-[10px]">{r.districtName}</div>
-                          </td>
-                          <td className="p-2 text-right font-mono">
-                            <span className={`font-semibold ${accentText}`}>{n}</span>
-                            <span className="text-muted-foreground"> / {r.denominator}</span>
-                          </td>
-                          <td className="p-2 text-right">
-                            <Badge variant="outline" className={accentBorder}>
-                              {pct}%
-                            </Badge>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
+          <CardContent className="p-2">
+            {isLoading ? (
+              <div className="p-4 space-y-2">
+                {[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-10 w-full" />)}
+              </div>
+            ) : (
+              <DataTable
+                data={filtered.map((r) => ({
+                  ...r,
+                  id: r.villageId ?? `f-${r.facilityId}`,
+                  count: countFor(r),
+                  displayPct: mode === "zero" ? r.pct : r.underImmunizedPct,
+                }))}
+                columns={[
+                  {
+                    key: "villageName",
+                    header: "Village",
+                    sortable: true,
+                    render: (r: any) => (
+                      <div>
+                        <div className="font-medium flex items-center gap-1">
+                          {r.latitude != null && r.longitude != null && (
+                            <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
+                          )}
+                          <span className="truncate">{r.villageName}</span>
+                        </div>
+                        {r.isHardToReach && (
+                          <Badge
+                            variant="secondary"
+                            className="bg-amber-500/10 text-amber-700 text-[10px] mt-0.5"
+                          >
+                            HTR
+                          </Badge>
+                        )}
+                      </div>
+                    ),
+                  },
+                  {
+                    key: "facilityName",
+                    header: "Facility · District",
+                    sortable: true,
+                    render: (r: any) => (
+                      <div className="text-muted-foreground">
+                        <div className="truncate">{r.facilityName}</div>
+                        <div className="text-[10px]">{r.districtName}</div>
+                      </div>
+                    ),
+                  },
+                  {
+                    key: "count",
+                    header: mode === "zero" ? "Zero-dose" : "Under-imm.",
+                    sortable: true,
+                    render: (r: any) => (
+                      <div className="text-right font-mono">
+                        <span className={`font-semibold ${accentText}`}>{r.count}</span>
+                        <span className="text-muted-foreground text-xs"> / {r.denominator}</span>
+                      </div>
+                    ),
+                  },
+                  {
+                    key: "displayPct",
+                    header: "%",
+                    sortable: true,
+                    render: (r: any) => (
+                      <div className="text-right">
+                        <Badge variant="outline" className={accentBorder}>
+                          {r.displayPct}%
+                        </Badge>
+                      </div>
+                    ),
+                  },
+                ]}
+                searchable={true}
+                searchKeys={["villageName", "facilityName", "districtName"]}
+                pageSize={25}
+                enableSelection={true}
+                selectedIds={Array.from(selected)}
+                onSelectionChange={(ids) => {
+                  setSelected(new Set(ids.filter((id): id is number => typeof id === "number")));
+                }}
+                emptyMessage={
+                  mode === "zero"
+                    ? "No villages have zero-dose children for this filter."
+                    : "No villages have under-immunized children for this filter."
+                }
+              />
+            )}
           </CardContent>
         </Card>
       </div>

@@ -1,3 +1,8 @@
+// Default NODE_ENV to production if not explicitly set
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = "production";
+}
+
 // Load .env file for local development (Node 20.12+ built-in, no dotenv package needed)
 // This runs before any other imports that touch process.env (e.g. db.ts checks DATABASE_URL).
 try {

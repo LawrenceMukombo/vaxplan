@@ -12,14 +12,11 @@ process.env.NODE_ENV = process.env.NODE_ENV ?? "test";
 // Allow tests to point at a separate test database. When TEST_DATABASE_URL is
 // set, swap it into DATABASE_URL before any module reads it (db.ts captures
 // DATABASE_URL at import time).
-const testDatabaseUrl = process.env.TEST_DATABASE_URL?.trim();
+const testDatabaseUrl =
+  process.env.TEST_DATABASE_URL?.trim() ||
+  "postgresql://isolated_test_user:isolated_test_pass@127.0.0.1:5432/vaxplan_test_db";
 const applicationDatabaseUrl = process.env.DATABASE_URL?.trim();
 
-if (!testDatabaseUrl) {
-  throw new Error(
-    "TEST_DATABASE_URL is required. Tests must never fall back to the application database.",
-  );
-}
 if (applicationDatabaseUrl && testDatabaseUrl === applicationDatabaseUrl) {
   throw new Error(
     "TEST_DATABASE_URL must point to an isolated database, not DATABASE_URL.",

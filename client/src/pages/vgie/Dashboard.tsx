@@ -2,7 +2,8 @@ import { Link } from "wouter";
 import {
   Users, Building2, Hospital, AlertTriangle,
   TrendingUp, MapPin, CheckCircle, XCircle,
-  Clock, ChevronRight, Shield, Zap, Activity, Syringe, Radio
+  Clock, ChevronRight, Shield, Zap, Activity, Syringe, Radio,
+  X, Download, Filter
 } from "lucide-react";
 import { useGetDashboardSummary, useGetDistrictStats, useGetAlerts, useGetRecommendations, useGetOutreachFeed, useGetOutreachCoverage } from "@/hooks/vgie/useVgieApi";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -68,6 +69,7 @@ export default function Dashboard() {
   const [provinceId, setProvinceId] = useState<number | null>(null);
   const [districtId, setDistrictId] = useState<number | null>(null);
   const [facilityId, setFacilityId] = useState<number | null>(null);
+  const [selectedDistrictFilter, setSelectedDistrictFilter] = useState<string | null>(null);
 
   const filters = {
     provinceId: provinceId?.toString(),
@@ -93,6 +95,38 @@ export default function Dashboard() {
     unserved: d.unservedCount,
   }));
 
+  const handleExportChartData = () => {
+    if (!chartData || chartData.length === 0) return;
+    const headers = ["District/Facility", "Served", "Underserved", "Unserved"];
+    const rows = chartData.map((d) => [`"${d.name}"`, d.served, d.underserved, d.unserved]);
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `coverage_stats_${new Date().toISOString().split("T")[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const filteredAlerts = selectedDistrictFilter
+    ? (alerts ?? []).filter((a) => (a.districtName && a.districtName.toLowerCase() === selectedDistrictFilter.toLowerCase()) || a.message?.toLowerCase().includes(selectedDistrictFilter.toLowerCase()))
+    : (alerts ?? []);
+
+  const filteredRecs = selectedDistrictFilter
+    ? (recs ?? []).filter((r) => (r.districtName && r.districtName.toLowerCase() === selectedDistrictFilter.toLowerCase()) || r.settlementName?.toLowerCase().includes(selectedDistrictFilter.toLowerCase()))
+    : (recs ?? []);
+
+  const filteredCoverage = selectedDistrictFilter
+    ? (outreachCoverage ?? []).filter((row) => row.district.toLowerCase() === selectedDistrictFilter.toLowerCase())
+    : (outreachCoverage ?? []);
+
+  const filteredFeed = selectedDistrictFilter
+    ? (outreachFeed ?? []).filter((item) => item.district.toLowerCase() === selectedDistrictFilter.toLowerCase())
+    : (outreachFeed ?? []);
+
   const scopeLabel = facilityId
     ? "Selected facility"
     : districtId
@@ -113,14 +147,35 @@ export default function Dashboard() {
           onFacilityChange={setFacilityId}
           showFacility={true}
         />
-        {(provinceId || districtId || facilityId) && (
+        {selectedDistrictFilter && (
+          <Badge
+            variant="secondary"
+            className="flex items-center gap-1.5 px-3 py-1 bg-primary/10 border border-primary/20 text-primary text-xs"
+          >
+            <Filter className="w-3 h-3" />
+            <span>Chart Filter: <strong>{selectedDistrictFilter}</strong></span>
+            <button
+              onClick={() => setSelectedDistrictFilter(null)}
+              className="ml-1 hover:text-foreground inline-flex items-center"
+              title="Remove chart filter"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </Badge>
+        )}
+        {(provinceId || districtId || facilityId || selectedDistrictFilter) && (
           <Button
             variant="ghost"
             size="sm"
             className="h-8 text-xs text-muted-foreground hover:text-foreground"
-            onClick={() => { setProvinceId(null); setDistrictId(null); setFacilityId(null); }}
+            onClick={() => {
+              setProvinceId(null);
+              setDistrictId(null);
+              setFacilityId(null);
+              setSelectedDistrictFilter(null);
+            }}
           >
-            Clear filters
+            Reset all filters
           </Button>
         )}
       </div>
@@ -177,10 +232,39 @@ export default function Dashboard() {
         {/* District Coverage Chart */}
         <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-emerald-500" />
-              Coverage {districtId ? "by Facility" : provinceId ? "by District" : "by District"}
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-emerald-500" />
+                Coverage {districtId ? "by Facility" : provinceId ? "by District" : "by District"}
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                {selectedDistrictFilter && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-[11px] px-2"
+                    onClick={() => setSelectedDistrictFilter(null)}
+                  >
+                    Reset Chart Filter
+                  </Button>
+                )}
+                {chartData && chartData.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs text-muted-foreground hover:text-foreground px-2"
+                    onClick={handleExportChartData}
+                    title="Export chart data as CSV"
+                  >
+                    <Download className="w-3.5 h-3.5 mr-1" />
+                    Export CSV
+                  </Button>
+                )}
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Click any bar to cross-filter alerts, recommendations, and outreach feeds by that area.
+            </p>
           </CardHeader>
           <CardContent>
             {loadingDistricts ? (
@@ -191,7 +275,18 @@ export default function Dashboard() {
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={chartData} barSize={20} barGap={4}>
+                <BarChart
+                  data={chartData}
+                  barSize={20}
+                  barGap={4}
+                  className="cursor-pointer"
+                  onClick={(state: any) => {
+                    if (state && state.activePayload && state.activePayload.length > 0) {
+                      const clickedName = state.activePayload[0].payload.name;
+                      setSelectedDistrictFilter((prev) => (prev === clickedName ? null : clickedName));
+                    }
+                  }}
+                >
                   <XAxis dataKey="name" tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} />
                   <Tooltip
@@ -199,9 +294,30 @@ export default function Dashboard() {
                     labelStyle={{ color: "hsl(var(--foreground))" }}
                     itemStyle={{ color: "hsl(var(--foreground))" }}
                   />
-                  <Bar dataKey="served" stackId="a" fill="#10b981" name="Served" radius={[0,0,0,0]} />
-                  <Bar dataKey="underserved" stackId="a" fill="#f59e0b" name="Underserved" />
-                  <Bar dataKey="unserved" stackId="a" fill="#ef4444" name="Unserved" radius={[4,4,0,0]} />
+                  <Bar dataKey="served" stackId="a" fill="#10b981" name="Served" radius={[0,0,0,0]}>
+                    {chartData.map((entry, index) => (
+                      <Cell
+                        key={`cell-served-${index}`}
+                        fill={selectedDistrictFilter && selectedDistrictFilter !== entry.name ? "#10b98133" : "#10b981"}
+                      />
+                    ))}
+                  </Bar>
+                  <Bar dataKey="underserved" stackId="a" fill="#f59e0b" name="Underserved">
+                    {chartData.map((entry, index) => (
+                      <Cell
+                        key={`cell-underserved-${index}`}
+                        fill={selectedDistrictFilter && selectedDistrictFilter !== entry.name ? "#f59e0b33" : "#f59e0b"}
+                      />
+                    ))}
+                  </Bar>
+                  <Bar dataKey="unserved" stackId="a" fill="#ef4444" name="Unserved" radius={[4,4,0,0]}>
+                    {chartData.map((entry, index) => (
+                      <Cell
+                        key={`cell-unserved-${index}`}
+                        fill={selectedDistrictFilter && selectedDistrictFilter !== entry.name ? "#ef444433" : "#ef4444"}
+                      />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -268,10 +384,17 @@ export default function Dashboard() {
         <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-500" />
-                Recent Alerts
-              </CardTitle>
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-500" />
+                  Recent Alerts
+                </CardTitle>
+                {selectedDistrictFilter && (
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-amber-500/30 text-amber-600 dark:text-amber-400">
+                    {selectedDistrictFilter}
+                  </Badge>
+                )}
+              </div>
               <Link href="/vgie/alerts">
                 <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground h-6 px-2">
                   View all <ChevronRight className="w-3 h-3 ml-1" />
@@ -281,7 +404,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {(alerts ?? []).slice(0, 4).map((alert) => (
+              {filteredAlerts.slice(0, 4).map((alert) => (
                 <div key={alert.id} className="flex items-start gap-2.5 p-2.5 rounded-lg bg-muted border border-border">
                   <Badge className={`text-[10px] px-1.5 py-0 shrink-0 mt-0.5 border ${severityColors[alert.severity]}`}>
                     {alert.severity}
@@ -289,9 +412,9 @@ export default function Dashboard() {
                   <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">{alert.message}</p>
                 </div>
               ))}
-              {(!alerts || alerts.length === 0) && (
+              {filteredAlerts.length === 0 && (
                 <div className="flex items-center justify-center py-6 text-muted-foreground text-sm">
-                  <Shield className="w-4 h-4 mr-2" /> No active alerts for the selected filters.
+                  <Shield className="w-4 h-4 mr-2" /> No active alerts {selectedDistrictFilter ? `matching "${selectedDistrictFilter}"` : "for the selected filters"}.
                 </div>
               )}
             </div>
@@ -302,10 +425,17 @@ export default function Dashboard() {
         <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
-                <Shield className="w-4 h-4 text-emerald-500" />
-                Pending Recommendations
-              </CardTitle>
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-emerald-500" />
+                  Pending Recommendations
+                </CardTitle>
+                {selectedDistrictFilter && (
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-emerald-500/30 text-emerald-600 dark:text-emerald-400">
+                    {selectedDistrictFilter}
+                  </Badge>
+                )}
+              </div>
               <Link href="/vgie/recommendations">
                 <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground h-6 px-2">
                   View all <ChevronRight className="w-3 h-3 ml-1" />
@@ -315,7 +445,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {(recs ?? []).slice(0, 4).map((rec) => (
+              {filteredRecs.slice(0, 4).map((rec) => (
                 <div key={rec.id} className="flex items-start gap-2.5 p-2.5 rounded-lg bg-muted border border-border">
                   <Badge className={`text-[10px] px-1.5 py-0 shrink-0 mt-0.5 border ${priorityColors[rec.priority]}`}>
                     {rec.priority}
@@ -326,9 +456,9 @@ export default function Dashboard() {
                   </div>
                 </div>
               ))}
-              {(!recs || recs.length === 0) && (
+              {filteredRecs.length === 0 && (
                 <div className="flex items-center justify-center py-6 text-muted-foreground text-sm">
-                  <CheckCircle className="w-4 h-4 mr-2" /> No pending recommendations for the selected filters.
+                  <CheckCircle className="w-4 h-4 mr-2" /> No pending recommendations {selectedDistrictFilter ? `matching "${selectedDistrictFilter}"` : "for the selected filters"}.
                 </div>
               )}
             </div>
@@ -340,10 +470,17 @@ export default function Dashboard() {
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
-              <Radio className="w-4 h-4 text-purple-500 dark:text-purple-400" />
-              Outreach Coverage by District
-            </CardTitle>
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
+                <Radio className="w-4 h-4 text-purple-500 dark:text-purple-400" />
+                Outreach Coverage by District
+              </CardTitle>
+              {selectedDistrictFilter && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-purple-500/30 text-purple-600 dark:text-purple-400">
+                  {selectedDistrictFilter}
+                </Badge>
+              )}
+            </div>
             <span className="text-[10px] text-muted-foreground uppercase tracking-wider">sorted by most overdue</span>
           </div>
         </CardHeader>
@@ -354,9 +491,9 @@ export default function Dashboard() {
                 <Skeleton key={i} className="h-9 bg-muted rounded" />
               ))}
             </div>
-          ) : !outreachCoverage || outreachCoverage.length === 0 ? (
+          ) : !filteredCoverage || filteredCoverage.length === 0 ? (
             <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
-              <Radio className="w-4 h-4 mr-2" /> No district data available
+              <Radio className="w-4 h-4 mr-2" /> No district data available {selectedDistrictFilter ? `for "${selectedDistrictFilter}"` : ""}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -375,7 +512,7 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {outreachCoverage.map((row) => (
+                  {filteredCoverage.map((row) => (
                     <tr key={row.district} className="hover:bg-muted transition-colors group">
                       <td className="py-2.5 pr-4 font-medium text-foreground">{row.district}</td>
                       <td className="py-2.5 pr-4 text-right text-muted-foreground">{row.totalSettlements}</td>
@@ -425,10 +562,19 @@ export default function Dashboard() {
       {/* Recent Outreach Activity Feed */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
-            <Activity className="w-4 h-4 text-emerald-500" />
-            Recent Outreach
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
+                <Activity className="w-4 h-4 text-emerald-500" />
+                Recent Outreach
+              </CardTitle>
+              {selectedDistrictFilter && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-emerald-500/30 text-emerald-600 dark:text-emerald-400">
+                  {selectedDistrictFilter}
+                </Badge>
+              )}
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {loadingFeed ? (
@@ -437,9 +583,9 @@ export default function Dashboard() {
                 <Skeleton key={i} className="h-10 bg-muted rounded" />
               ))}
             </div>
-          ) : !outreachFeed || outreachFeed.length === 0 ? (
+          ) : !filteredFeed || filteredFeed.length === 0 ? (
             <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
-              <Syringe className="w-4 h-4 mr-2" /> No outreach sessions recorded yet
+              <Syringe className="w-4 h-4 mr-2" /> No outreach sessions recorded {selectedDistrictFilter ? `for "${selectedDistrictFilter}"` : "yet"}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -454,7 +600,7 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {outreachFeed.map((item) => (
+                  {filteredFeed.map((item) => (
                     <tr key={item.id} className="hover:bg-muted transition-colors group">
                       <td className="py-2.5 pr-4">
                         <Link href={`/settlements/${item.settlementId}`}>

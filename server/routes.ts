@@ -43,6 +43,7 @@ import { getAndroidSmsStatus } from "./services/androidSmsService";
 import { dispatchNotification } from "./services/uce";
 import { surveillanceRouter } from "./routes/surveillance";
 import vgieRouter from "./routes/vgie";
+import gisRouter from "./routes/gis";
 import { researchRouter } from "./routes/research";
 import { planningActionsRouter } from "./routes/planningActions";
 import { planningEvidenceRouter } from "./routes/planningEvidence";
@@ -2037,6 +2038,7 @@ export async function registerRoutes(
   // Original code commented out for TypeScript compatibility with readonly tuple:
   // app.use("/api/vgie", auth, vgieRouter);
   app.use("/api/vgie", ...auth, vgieRouter);
+  app.use("/api/gis", ...auth, gisRouter);
   app.use("/api/surveillance", surveillanceRouter);
   app.use("/api/research", researchRouter);
   app.use("/api/planning-actions", planningActionsRouter);
@@ -16165,171 +16167,6 @@ Instructions:
     }
   );
   // ── End Wiki API ──────────────────────────────────────────────────────────
-  // ── VGIE Spatial Intelligence API ─────────────────────────────────────────
-  // NOTE: All VGIE routes are now handled by the dedicated vgieRouter mounted
-  // at app.use("/api/vgie", auth, vgieRouter) near line 1210. The legacy
-  // inline routes below have been commented out to avoid conflicts.
-
-  /* Original Code — legacy VGIE inline routes (superseded by vgieRouter):
-  app.get("/api/vgie/recommendations", ...auth, async (req: any, res) => {
-    try {
-      const recommendations = await db.select().from(vgieRecommendations).where(eq(vgieRecommendations.tenantId, req.tenantId));
-      res.json(recommendations);
-    } catch (err: any) {
-      console.error("[vgie/recommendations]", err);
-      res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
-    }
-  });
-
-  app.get("/api/vgie/alerts", ...auth, async (req: any, res) => {
-    try {
-      const alerts = await db.select().from(vgieAlerts).where(eq(vgieAlerts.tenantId, req.tenantId));
-      res.json(alerts);
-    } catch (err: any) {
-      console.error("[vgie/alerts]", err);
-      res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
-    }
-  });
-
-  app.post("/api/vgie/analyze-catchment", ...auth, async (req: any, res) => {
-    try {
-      const recommendations = await VgieService.generateRecommendations(req.tenantId);
-      const alerts = await VgieService.detectCoverageGaps(req.tenantId);
-      res.json({ success: true, recommendationsCount: recommendations.length, alertsCount: alerts.length });
-    } catch (err: any) {
-      console.error("[vgie/analyze-catchment]", err);
-      res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
-    }
-  });
-  */
-
-  // ── GIS Location Intelligence API ─────────────────────────────────────────
-  app.get("/api/gis/location-intelligence", ...auth, async (req: any, res) => {
-    try {
-      const lat = parseFloat(req.query.lat as string);
-      const lng = parseFloat(req.query.lng as string);
-      const radiusKm = parseFloat(req.query.radiusKm as string) || 5;
-
-      if (isNaN(lat) || isNaN(lng)) {
-        return res.status(400).json({ message: "Valid lat and lng required." });
-      }
-
-      const tenantId = req.tenantId;
-      const radiusMeters = radiusKm * 1000;
-
-      // 1. Nearby Facilities
-      const facQuery = `
-        SELECT
-          id, name, facility_type AS "facilityType", operational_status AS status, latitude, longitude,
-          ST_Distance(
-            ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
-            ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography
-          ) as distance_meters
-        FROM facilities
-        WHERE tenant_id = $3
-          AND latitude IS NOT NULL AND longitude IS NOT NULL
-          AND ST_DWithin(
-            ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
-            ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography,
-            $4
-          )
-        ORDER BY distance_meters ASC
-        LIMIT 10
-      `;
-      // 2. Nearby Communities/Villages
-      const commQuery = `
-        SELECT
-          id, name, total_catchment_population AS population, assigned_facility_id, is_hard_to_reach, latitude, longitude,
-          ST_Distance(
-            ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
-            ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography
-          ) as distance_meters
-        FROM villages
-        WHERE tenant_id = $3
-          AND latitude IS NOT NULL AND longitude IS NOT NULL
-          AND ST_DWithin(
-            ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
-            ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography,
-            $4
-          )
-        ORDER BY distance_meters ASC
-        LIMIT 20
-      `;
-      // 3. Resolve Admin Boundaries for this point
-      const adminQuery = `
-        SELECT
-          b.admin_level,
-          COALESCE(
-            feat->'properties'->>'shapeName',
-            feat->'properties'->>'name',
-            feat->'properties'->>'NAME'
-          ) AS name
-        FROM admin_boundaries b,
-             LATERAL jsonb_array_elements(b.geojson->'features') AS feat
-        WHERE b.tenant_id = $1
-          AND ST_Contains(
-            ST_SetSRID(ST_GeomFromGeoJSON(feat->>'geometry'), 4326),
-            ST_SetSRID(ST_MakePoint($2, $3), 4326)
-          )
-      `;
-      // These lookups are independent. Running them concurrently removes two
-      // database round trips from the critical path of opening the drawer.
-      const [facilitiesRes, communitiesRes, adminRes] = await Promise.all([
-        pool.query(facQuery, [lng, lat, tenantId, radiusMeters]),
-        pool.query(commQuery, [lng, lat, tenantId, radiusMeters]),
-        pool.query(adminQuery, [tenantId, lng, lat]),
-      ]);
-      const adminHierarchy: Record<number, string> = {};
-      adminRes.rows.forEach(r => {
-        adminHierarchy[r.admin_level] = r.name;
-      });
-
-      // Populate calculated data
-      let totalPop = 0;
-      let totalU5 = 0;
-      let zeroDose = 0;
-
-      const communities = communitiesRes.rows.map(c => {
-        const pop = Number(c.population) || 0;
-        const u5 = Math.round(pop * 0.17); // approx 17% under 5
-        const zd = Math.round(u5 * 0.05); // approx 5% zero dose
-        totalPop += pop;
-        totalU5 += u5;
-        zeroDose += zd;
-        return {
-          ...c,
-          under5: u5,
-          zeroDose: zd,
-          distance_km: (c.distance_meters / 1000).toFixed(2)
-        };
-      });
-
-      const facilitiesList = facilitiesRes.rows.map(f => ({
-        ...f,
-        distance_km: (f.distance_meters / 1000).toFixed(2)
-      }));
-
-      setCacheHeaders(res, 60);
-      res.json({
-        success: true,
-        data: {
-          point: { lat, lng },
-          radiusKm,
-          adminHierarchy,
-          aggregated: {
-            totalPopulation: totalPop,
-            under5: totalU5,
-            zeroDoseEstimates: zeroDose
-          },
-          facilities: facilitiesList,
-          communities: communities
-        }
-      });
-    } catch (err: any) {
-      console.error("[GIS Intelligence API]", err);
-      res.status(500).json({ message: safeErrorMessage(err, "Failed to load GIS intelligence data") });
-    }
-  });
 
   // ── Population Intelligence API ─────────────────────────────────────────
   app.get("/api/gis/population-intelligence", ...auth, async (req: any, res) => {

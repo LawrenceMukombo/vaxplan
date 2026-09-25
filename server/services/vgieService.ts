@@ -11,6 +11,53 @@ import {
 } from "../../shared/schema";
 import { eq, and, sql, inArray } from "drizzle-orm";
 
+export const ALLOWED_VGIE_COLUMNS = new Set([
+  "assigned_facility_id",
+  "is_hard_to_reach",
+  "distance_to_facility",
+  "under5_population",
+  "gridded_population",
+  "high_risk",
+  "population",
+]);
+
+export function validateVgieCondition(condition: string): { valid: boolean; error?: string } {
+  if (!condition || typeof condition !== "string") {
+    return { valid: false, error: "Condition must be a non-empty string" };
+  }
+  const trimmed = condition.trim();
+  if (trimmed.length > 200) {
+    return { valid: false, error: "Condition exceeds maximum length of 200 characters" };
+  }
+  // Reject dangerous SQL tokens and characters
+  if (/([;'"\-\-\/\*]|union|select|drop|delete|update|insert|exec|alter|create|table|from|where|pg_|information_schema)/i.test(trimmed)) {
+    return { valid: false, error: "Condition contains forbidden characters or SQL keywords" };
+  }
+
+  const clauses = trimmed.split(/\s+(?:AND|and|OR|or)\s+/);
+  for (const clause of clauses) {
+    const c = clause.trim();
+    const isNullMatch = c.match(/^([a-z0-9_]+)\s+IS(?:\s+NOT)?\s+NULL$/i);
+    if (isNullMatch) {
+      const col = isNullMatch[1].toLowerCase();
+      if (!ALLOWED_VGIE_COLUMNS.has(col)) {
+        return { valid: false, error: `Disallowed column: "${col}"` };
+      }
+      continue;
+    }
+    const compMatch = c.match(/^([a-z0-9_]+)\s*(=|!=|<=|>=|<|>)\s*(true|false|\d+(?:\.\d+)?)$/i);
+    if (!compMatch) {
+      return { valid: false, error: `Invalid condition clause: "${c}"` };
+    }
+    const col = compMatch[1].toLowerCase();
+    if (!ALLOWED_VGIE_COLUMNS.has(col)) {
+      return { valid: false, error: `Disallowed column: "${col}"` };
+    }
+  }
+
+  return { valid: true };
+}
+
 /**
  * VaxPlan Geospatial Intelligence Engine (VGIE) Service
  */
@@ -37,6 +84,12 @@ export class VgieService {
 
     for (const rule of activeRules) {
       try {
+        const validation = validateVgieCondition(rule.conditionSql);
+        if (!validation.valid) {
+          console.warn(`[VGIE] Skipping recommendation rule "${rule.name}" (ID ${rule.id}): ${validation.error}`);
+          continue;
+        }
+
         // Query villages that match rule.conditionSql
         const matchingVillages = await db
           .select({
@@ -121,6 +174,12 @@ export class VgieService {
 
     for (const rule of activeAlertRules) {
       try {
+        const validation = validateVgieCondition(rule.triggerCondition);
+        if (!validation.valid) {
+          console.warn(`[VGIE] Skipping alert rule "${rule.name}" (ID ${rule.id}): ${validation.error}`);
+          continue;
+        }
+
         const matchingVillages = await db
           .select()
           .from(villages)

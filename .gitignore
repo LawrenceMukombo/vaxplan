@@ -54,3 +54,20 @@ zip_extract/
 *.id
 *.pid
 
+# Scratch & temporary artifacts
+*.bak*
+*.sql.zip
+.codex*
+qa_*/
+tmp/
+*.tmp
+server/scripts/
+generate_*.mjs
+check_*.cjs
+advert_*.py
+render_advert.py
+extracted_docx_text.txt
+scripts/check_*.ts
+layers-*.png
+marker-icon-*.png
+

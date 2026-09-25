@@ -137,13 +137,29 @@ async function run() {
       throw new Error(`Migrations directory not found at ${migrationsDir}`);
     }
     
+    // Ensure migration state tracking table exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS _applied_migrations (
+        id integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+        name varchar(255) NOT NULL UNIQUE,
+        applied_at timestamp DEFAULT now()
+      );
+    `);
+
+    const { rows: appliedRows } = await client.query(`SELECT name FROM _applied_migrations;`);
+    const appliedSet = new Set<string>(appliedRows.map((r: any) => r.name));
+    
     const files = fs.readdirSync(migrationsDir)
       .filter(f => f.endsWith('.sql'))
       .sort();
       
-    console.log(`Found ${files.length} migration files.`);
+    console.log(`Found ${files.length} migration files (${appliedSet.size} previously recorded).`);
     
     for (const file of files) {
+      if (appliedSet.has(file)) {
+        console.log(`Skipping already-applied migration: ${file}`);
+        continue;
+      }
       const filePath = path.join(migrationsDir, file);
       console.log(`Applying SQL migration: ${file}`);
       
@@ -175,6 +191,12 @@ async function run() {
           }
         }
       }
+
+      await client.query(
+        `INSERT INTO _applied_migrations (name) VALUES ($1) ON CONFLICT (name) DO NOTHING;`,
+        [file]
+      );
+      appliedSet.add(file);
     }
     
     

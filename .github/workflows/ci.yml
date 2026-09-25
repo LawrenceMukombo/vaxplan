@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vaxplan_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d vaxplan_test"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/vaxplan_test
+      SESSION_SECRET: ci-only-session-secret-not-for-production
+      NODE_ENV: test
+      SKIP_DEMO_SEED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+      - run: npm run check
+      - run: npm run migrations:verify
+      - name: Apply schema to isolated test database
+        run: DATABASE_URL="$TEST_DATABASE_URL" npm run db:push -- --force
+      - run: npm test
+      - run: npm run security:audit
+      - run: npm run build

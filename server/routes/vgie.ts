@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "../db";
-import { VgieService } from "../services/vgieService";
+import { VgieService, validateVgieCondition } from "../services/vgieService";
 import { storage } from "../storage";
 import {
   villages,
@@ -26,6 +26,17 @@ type VgieGeoScope = {
 function roleListFor(user: any): string[] {
   return [user?.role, ...(Array.isArray(user?.roles) ? user.roles : [])].filter(Boolean);
 }
+
+function requireVgieRuleAdmin(req: any, res: any, next: any) {
+  const user = req.dbUser;
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+  const roles = roleListFor(user);
+  if (user.isPlatformAdmin || roles.includes("national_admin") || roles.includes("gis_specialist")) {
+    return next();
+  }
+  return res.status(403).json({ error: "Forbidden: GIS Specialist or National Admin required to manage VGIE rules" });
+}
+
 async function getVgieGeoScope(req: any): Promise<VgieGeoScope> {
   const user = req.dbUser;
   if (!user) return { all: false, provinceIds: [], districtIds: [], facilityIds: [] };
@@ -2048,11 +2059,15 @@ router.get("/recommendation-rules", async (req: any, res) => {
     res.status(500).json({ error: "Failed to fetch recommendation rules" });
   }
 });
-router.post("/recommendation-rules", async (req: any, res) => {
+router.post("/recommendation-rules", requireVgieRuleAdmin, async (req: any, res) => {
   try {
     const { name, description, category, conditionSql, recommendationText, priority, isActive } = req.body;
     if (!name || !category || !conditionSql || !recommendationText) {
       return res.status(400).json({ error: "Missing required fields" });
+    }
+    const validation = validateVgieCondition(conditionSql);
+    if (!validation.valid) {
+      return res.status(400).json({ error: `Invalid conditionSql: ${validation.error}` });
     }
     const [rule] = await db
       .insert(vgieRecommendationRules)
@@ -2073,11 +2088,17 @@ router.post("/recommendation-rules", async (req: any, res) => {
     res.status(500).json({ error: "Failed to create recommendation rule" });
   }
 });
-router.patch("/recommendation-rules/:id", async (req: any, res) => {
+router.patch("/recommendation-rules/:id", requireVgieRuleAdmin, async (req: any, res) => {
   try {
     const id = Number(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
     const { name, description, category, conditionSql, recommendationText, priority, isActive } = req.body;
+    if (conditionSql !== undefined) {
+      const validation = validateVgieCondition(conditionSql);
+      if (!validation.valid) {
+        return res.status(400).json({ error: `Invalid conditionSql: ${validation.error}` });
+      }
+    }
     const updateData: any = { updatedAt: new Date() };
     if (name !== undefined) updateData.name = name;
     if (description !== undefined) updateData.description = description;
@@ -2103,7 +2124,7 @@ router.patch("/recommendation-rules/:id", async (req: any, res) => {
     res.status(500).json({ error: "Failed to update recommendation rule" });
   }
 });
-router.delete("/recommendation-rules/:id", async (req: any, res) => {
+router.delete("/recommendation-rules/:id", requireVgieRuleAdmin, async (req: any, res) => {
   try {
     const id = Number(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
