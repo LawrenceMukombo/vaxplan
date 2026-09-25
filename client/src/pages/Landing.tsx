@@ -363,14 +363,9 @@ function PasswordLoginDialog({
                 programs — from the capital down to the last village.
               </p>
             </div>
-            <div className="relative flex items-center justify-between text-xs text-white/80 pt-3 border-t border-white/10">
-              <div className="flex items-center gap-2">
-                <Shield className="h-4 w-4 shrink-0" />
-                <span>Encrypted · Audit-logged · Isolated</span>
-              </div>
-              <span className="font-mono text-[11px] text-white/90 bg-white/15 px-2 py-0.5 rounded-full border border-white/20">
-                v{APP_VERSION}
-              </span>
+            <div className="relative flex items-center gap-2 text-xs text-white/70 pt-3 border-t border-white/10">
+              <Shield className="h-4 w-4 shrink-0" />
+              <span>Encrypted · Audit-logged · Isolated</span>
             </div>
           </div>
 
@@ -503,12 +498,7 @@ function PasswordLoginDialog({
                       vaxplan@gmail.com
                     </a>
                   </p>
-                  <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground/75 pt-1">
-                    <span className="inline-flex items-center gap-1.5 font-mono bg-muted/60 px-2 py-0.5 rounded border border-border/50 text-foreground/80">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-                      App v{APP_VERSION}
-                    </span>
-                    <span>·</span>
+                  <div className="text-center text-[11px] text-muted-foreground/60 pt-1">
                     <span>Multi-Tenant Health Microplanning</span>
                   </div>
                 </div>
@@ -930,10 +920,7 @@ export default function Landing() {
             </div>
             <div className="flex flex-col">
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-sm">VaxPlan</span>
-                <span className="font-mono text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20">
-                  v{APP_VERSION}
-                </span>
+                <span className="font-semibold text-sm" title={`VaxPlan v${APP_VERSION}`}>VaxPlan</span>
               </div>
               <span className="text-xs text-muted-foreground">
                 Health microplanning for Ministries
@@ -1954,7 +1941,7 @@ export default function Landing() {
               Built for national immunization programs · Multi-tenant SaaS
             </div>
           </div>
-          <div className="mt-3 text-center text-[11px] text-muted-foreground/80" data-testid="landing-version">
+          <div className="mt-3 text-center text-[10px] text-muted-foreground/40 font-mono" data-testid="landing-version">
             {versionLabel()}
           </div>
         </div>

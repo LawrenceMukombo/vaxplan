@@ -613,11 +613,10 @@ function AuthenticatedLayout() {
                 <OnlinePresence />
                 <ThemeToggle />
                 <span
-                  className="hidden sm:inline-flex items-center gap-1.5 font-mono text-[11px] px-2 py-0.5 rounded-full bg-muted/60 border border-border/60 text-muted-foreground font-medium"
+                  className="hidden lg:inline-block font-mono text-[10px] text-muted-foreground/35 select-none"
                   title={`VaxPlan v${APP_VERSION}`}
                   data-testid="badge-app-version"
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
                   v{APP_VERSION}
                 </span>
                 <UserMenu user={user} />

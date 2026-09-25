@@ -295,10 +295,7 @@ export default function LoginPage() {
           </div>
           <div className="flex flex-col leading-tight">
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-sm">VaxPlan</span>
-              <span className="font-mono text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20">
-                v{displayVersion}
-              </span>
+              <span className="font-semibold text-sm" title={`VaxPlan v${displayVersion}`}>VaxPlan</span>
             </div>
             <span className="text-[10px] text-muted-foreground">
               Health microplanning for Ministries
@@ -349,16 +346,9 @@ export default function LoginPage() {
                 programs — from the capital down to the last village.
               </p>
             </div>
-            <div className="relative flex flex-col gap-1.5 text-xs text-white/80 pt-4 border-t border-white/10">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Shield className="h-4 w-4 shrink-0" />
-                  <span>Encrypted · Audit-logged · Country-isolated</span>
-                </div>
-                <span className="font-mono text-[11px] text-white/90 bg-white/15 px-2 py-0.5 rounded-full border border-white/20">
-                  v{displayVersion}
-                </span>
-              </div>
+            <div className="relative flex items-center gap-2 text-xs text-white/70 pt-4 border-t border-white/10">
+              <Shield className="h-4 w-4 shrink-0" />
+              <span>Encrypted · Audit-logged · Country-isolated</span>
             </div>
           </div>
 
@@ -534,13 +524,8 @@ export default function LoginPage() {
                       vaxplan@gmail.com
                     </a>
                   </p>
-                  <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground/75 pt-1">
-                    <span className="inline-flex items-center gap-1.5 font-mono bg-muted/60 px-2 py-0.5 rounded border border-border/50 text-foreground/80">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-                      App v{displayVersion}
-                    </span>
-                    <span>·</span>
-                    <span className="font-sans">Release {buildDateStr.split(" ")[0]}</span>
+                  <div className="text-center text-[10px] text-muted-foreground/50 pt-1">
+                    <span>Multi-Tenant Health Microplanning Platform</span>
                   </div>
                 </div>
               </>
@@ -612,15 +597,9 @@ export default function LoginPage() {
       <footer className="py-4 text-center text-xs text-muted-foreground flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 px-4">
         <span>© {new Date().getFullYear()} VaxPlan · Multi-Tenant Health Microplanning Platform</span>
         <span className="hidden sm:inline opacity-30">•</span>
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 font-mono text-[11px] px-2.5 py-0.5 rounded-full bg-background border border-border/70 text-foreground shadow-2xs">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-            v{displayVersion}
-          </span>
-          <span className="text-[11px] text-muted-foreground font-mono">
-            ({buildDateStr})
-          </span>
-        </div>
+        <span className="text-[10px] text-muted-foreground/40 font-mono">
+          v{displayVersion} ({buildDateStr})
+        </span>
       </footer>
     </div>
   );

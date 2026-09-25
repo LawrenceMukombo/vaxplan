@@ -485,10 +485,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
               </div>
               <div className="flex flex-col min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <span className="font-bold text-sm truncate leading-tight tracking-tight" data-testid="text-brand-name">VaxPlan</span>
-                  <span className="font-mono text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20 shrink-0">
-                    v{APP_VERSION}
-                  </span>
+                  <span className="font-bold text-sm truncate leading-tight tracking-tight" data-testid="text-brand-name" title={`VaxPlan v${APP_VERSION}`}>VaxPlan</span>
                 </div>
                 <span className="text-[11px] text-muted-foreground truncate leading-tight" data-testid="text-tenant-name">
                   {tenant?.name ?? "Health Microplanning"}
@@ -712,7 +709,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
             Customize Sidebar
           </Button>
 
-          <div className="text-[11px] text-muted-foreground text-center">
+          <div className="text-[10px] text-muted-foreground/35 text-center font-mono select-none">
             {versionLabel()}
           </div>
           <div className="flex items-center justify-center">

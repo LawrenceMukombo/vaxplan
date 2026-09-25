@@ -125,11 +125,10 @@ export function UserMenu({ user }: UserMenuProps) {
           Log out
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <div className="px-2 py-1.5 text-center select-none bg-muted/30">
-          <div className="inline-flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-            VaxPlan v{APP_VERSION}
-          </div>
+        <div className="px-2 py-1 text-center select-none">
+          <span className="font-mono text-[10px] text-muted-foreground/35">
+            v{APP_VERSION}
+          </span>
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
