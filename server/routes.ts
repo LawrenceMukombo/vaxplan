@@ -8217,6 +8217,68 @@ export async function registerRoutes(
     try {
       const layer = await storage.getCustomLayer(req.tenantId as string, req.params.id);
       if (!layer) return res.status(404).json({ message: "Layer not found" });
+
+      const dbUser = req.dbUser ?? (await storage.getUser(getCurrentUserId(req)));
+      if (dbUser && layer.layerType === "vector" && (layer.geojson as any)?.features) {
+        const scope = await getGeoScope(dbUser, req.tenantId as string);
+        if (!scope.all) {
+          const [tenantDistricts, tenantProvinces, tenantFacilities] = await Promise.all([
+            storage.getDistricts(req.tenantId as string),
+            storage.getProvinces(req.tenantId as string),
+            storage.getFacilities(req.tenantId as string),
+          ]);
+          const scopedDistricts = tenantDistricts.filter((d: any) => scope.districtIds.has(Number(d.id)));
+          const scopedDistrictNames = new Set(scopedDistricts.map((d: any) => String(d.name).trim().toLowerCase()));
+          const scopedProvinces = tenantProvinces.filter((p: any) => scope.provinceIds.has(Number(p.id)));
+          const scopedProvinceNames = new Set(scopedProvinces.map((p: any) => String(p.name).trim().toLowerCase()));
+
+          const userFacilities = tenantFacilities.filter((f: any) => scope.facilityIds.has(Number(f.id)));
+          let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+          let hasFacilityCoords = false;
+          userFacilities.forEach((f: any) => {
+            const lat = Number(f.latitude);
+            const lng = Number(f.longitude);
+            if (!isNaN(lat) && !isNaN(lng)) {
+              hasFacilityCoords = true;
+              if (lat < minLat) minLat = lat;
+              if (lat > maxLat) maxLat = lat;
+              if (lng < minLng) minLng = lng;
+              if (lng > maxLng) maxLng = lng;
+            }
+          });
+          minLat -= 0.35; maxLat += 0.35; minLng -= 0.35; maxLng += 0.35;
+
+          const filteredFeatures = (layer.geojson as any).features.filter((feat: any) => {
+            const props = feat.properties || {};
+            const dName = String(props.adm2_name || props.district || props.district_name || props.District || "").trim().toLowerCase();
+            if (dName && scopedDistrictNames.size > 0) {
+              return scopedDistrictNames.has(dName);
+            }
+            const pName = String(props.adm1_name || props.province || props.province_name || props.Province || "").trim().toLowerCase();
+            if (pName && scopedProvinceNames.size > 0 && !dName) {
+              return scopedProvinceNames.has(pName);
+            }
+            if (hasFacilityCoords && feat.geometry) {
+              const geom = feat.geometry;
+              if (geom.type === "Point" && Array.isArray(geom.coordinates)) {
+                const [lng, lat] = geom.coordinates;
+                return lng >= minLng && lng <= maxLng && lat >= minLat && lat <= maxLat;
+              }
+              if (geom.type === "Polygon" && Array.isArray(geom.coordinates?.[0])) {
+                return geom.coordinates[0].some((c: number[]) => c[0] >= minLng && c[0] <= maxLng && c[1] >= minLat && c[1] <= maxLat);
+              }
+            }
+            return false;
+          });
+
+          return res.json({
+            ...layer,
+            geojson: { ...(layer.geojson as any), features: filteredFeatures },
+            featureCount: filteredFeatures.length,
+          });
+        }
+      }
+
       res.json(layer);
     } catch (err: any) {
       console.error("GET /api/custom-layers/:id failed:", err);
@@ -8431,11 +8493,16 @@ export async function registerRoutes(
   // FACILITY CATCHMENTS — HCW-drawn polygon catchment areas
   // ─────────────────────────────────────────────────────────────────────────
 
-  // GET /api/catchments — all catchments for current tenant (for MapView overlay)
+  // GET /api/catchments — all catchments for current tenant (for MapView overlay, scoped to jurisdiction)
   app.get("/api/catchments", isAuthenticated, requireTenant, async (req: any, res) => {
     try {
       const catchments = await storage.getAllFacilityCatchments(req.tenantId as string);
-      res.json(catchments);
+      const dbUser = req.dbUser ?? (await storage.getUser(getCurrentUserId(req)));
+      if (!dbUser) return res.json(catchments);
+      const scope = await getGeoScope(dbUser, req.tenantId as string);
+      if (scope.all) return res.json(catchments);
+      const filtered = catchments.filter((c: any) => scope.facilityIds.has(Number(c.facilityId)));
+      res.json(filtered);
     } catch {
       res.status(500).json({ message: "Failed to fetch catchments" });
     }
@@ -17031,6 +17098,7 @@ Instructions:
   registerPolygonLifecycleRoutes(app, {
     auth,
     canAccessGeo: userCanAccessGeo,
+    getGeoScope,
     logAudit,
   });
   return httpServer;

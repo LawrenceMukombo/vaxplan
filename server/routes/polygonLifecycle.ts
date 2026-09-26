@@ -30,6 +30,7 @@ type LifecycleDependencies = {
     tenantId: string,
     geo: { facilityId?: number | null; districtId?: number | null; provinceId?: number | null },
   ) => Promise<boolean>;
+  getGeoScope?: (dbUser: any, tenantId: string) => Promise<any>;
   logAudit: (
     req: any,
     action: string,
@@ -716,10 +717,35 @@ export function registerPolygonLifecycleRoutes(app: Express, deps: LifecycleDepe
 
     const rows = await db.select().from(gisPolygons).where(and(...queryConditions));
 
+    let allowedRows = rows;
+    if (deps.getGeoScope) {
+      const dbUser = req.dbUser ?? (await storage.getUser(getCurrentUserId(req)));
+      if (dbUser) {
+        const scope = await deps.getGeoScope(dbUser, req.tenantId);
+        if (scope && !scope.all) {
+          allowedRows = rows.filter((row: any) => {
+            if (row.ownerType === "facility") {
+              return scope.facilityIds.has(Number(row.ownerId));
+            }
+            if (row.ownerType === "district") {
+              return scope.districtIds.has(Number(row.ownerId));
+            }
+            if (row.ownerType === "province") {
+              return scope.provinceIds.has(Number(row.ownerId));
+            }
+            if (row.parentFacilityId) {
+              return scope.facilityIds.has(Number(row.parentFacilityId));
+            }
+            return false;
+          });
+        }
+      }
+    }
+
     const hasBbox = Number.isFinite(minLng) && Number.isFinite(minLat) && Number.isFinite(maxLng) && Number.isFinite(maxLat);
     const bboxPoly = hasBbox ? turf.bboxPolygon([minLng, minLat, maxLng, maxLat]) : null;
 
-    const filtered = rows.filter((row) => {
+    const filtered = allowedRows.filter((row) => {
       if (!bboxPoly) return true;
       try {
         const feat = turf.feature(row.geometry as any);

@@ -4,6 +4,7 @@ import { MapView } from "@/components/MapView";
 import type { Facility, Village } from "@shared/schema";
 import { offlineDb } from "../lib/offlineDb";
 import { loadActiveTenant } from "../lib/tenantCache";
+import { useAuth } from "@/hooks/useAuth";
 
 interface PublicTenant {
   id: string;
@@ -126,7 +127,7 @@ export default function MapPage() {
     let calculatedCenter: [number, number] = tenantCenter ?? FALLBACK_CENTER;
     let calculatedZoom: number = tenantZoom ?? FALLBACK_ZOOM;
 
-    if (!isOnline && !tenantCenter && facilityCoords.length > 0) {
+    if (facilityCoords.length > 0) {
       const avgLat =
         facilityCoords.reduce((s, f) => s + Number(f.latitude), 0) /
         facilityCoords.length;
@@ -134,6 +135,7 @@ export default function MapPage() {
         facilityCoords.reduce((s, f) => s + Number(f.longitude), 0) /
         facilityCoords.length;
       calculatedCenter = [avgLat, avgLng];
+      calculatedZoom = facilityCoords.length <= 1 ? 13 : facilityCoords.length < 15 ? 10 : 9;
     }
 
     return { center: calculatedCenter, zoom: calculatedZoom };

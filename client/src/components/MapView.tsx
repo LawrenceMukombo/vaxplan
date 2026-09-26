@@ -2004,7 +2004,21 @@ function GeoTIFFOverlay({ url, opacity = 0.65, onRasterLoaded, cacheScope, autoF
 // Renders a single custom vector layer. Fetches the full GeoJSON (which is NOT
 // included in the list endpoint to keep it light) only when this layer is
 // actually shown on the map.
-function CustomVectorLayer({ id, style }: { id: string; style: any }) {
+function CustomVectorLayer({
+  id,
+  style,
+  userDistrictNames,
+  userProvinceNames,
+  userBbox,
+  isNational = true,
+}: {
+  id: string;
+  style: any;
+  userDistrictNames?: Set<string>;
+  userProvinceNames?: Set<string>;
+  userBbox?: { minLat: number; maxLat: number; minLng: number; maxLng: number } | null;
+  isNational?: boolean;
+}) {
   const { data } = useQuery<any>({
     queryKey: [`/api/custom-layers/${id}`],
     staleTime: 10 * 60 * 1000,
@@ -2023,11 +2037,44 @@ function CustomVectorLayer({ id, style }: { id: string; style: any }) {
     fillOpacity: style?.fillOpacity ?? 0.25,
     renderer: canvasRenderer,
   };
-  if (!data?.geojson?.features?.length) return null;
+
+  const filteredGeojson = useMemo(() => {
+    if (!data?.geojson?.features?.length) return null;
+    if (isNational) return data.geojson;
+
+    const features = data.geojson.features.filter((feature: any) => {
+      const props = feature.properties || {};
+      const dName = normalizeName(props.adm2_name || props.district || props.district_name || props.District || "");
+      if (dName && userDistrictNames && userDistrictNames.size > 0) {
+        return userDistrictNames.has(dName);
+      }
+      const pName = normalizeName(props.adm1_name || props.province || props.province_name || props.Province || "");
+      if (pName && userProvinceNames && userProvinceNames.size > 0 && !dName) {
+        return userProvinceNames.has(pName);
+      }
+      if (userBbox && feature.geometry) {
+        const geom = feature.geometry;
+        if (geom.type === "Point" && Array.isArray(geom.coordinates)) {
+          const [lng, lat] = geom.coordinates;
+          return lng >= userBbox.minLng && lng <= userBbox.maxLng && lat >= userBbox.minLat && lat <= userBbox.maxLat;
+        }
+        if (geom.type === "Polygon" && Array.isArray(geom.coordinates?.[0])) {
+          return geom.coordinates[0].some(
+            (c: number[]) => c[0] >= userBbox.minLng && c[0] <= userBbox.maxLng && c[1] >= userBbox.minLat && c[1] <= userBbox.maxLat
+          );
+        }
+      }
+      return false;
+    });
+
+    return { ...data.geojson, features };
+  }, [data, isNational, userDistrictNames, userProvinceNames, userBbox]);
+
+  if (!filteredGeojson?.features?.length) return null;
   return (
     <GeoJSON
-      key={`custom-layer-${id}`}
-      data={data.geojson}
+      key={`custom-layer-${id}-${filteredGeojson.features.length}`}
+      data={filteredGeojson}
       style={() => pathStyle as any}
       pointToLayer={(_feature, latlng) =>
         L.circleMarker(latlng, { radius: style?.pointRadius ?? 5, ...pathStyle })
@@ -2509,9 +2556,50 @@ export function MapView({
     if (!user) return false;
     const role = (user.role || "").toLowerCase();
     const roles: string[] = Array.isArray(user.roles) ? user.roles.map((r: any) => String(r).toLowerCase()) : [];
-    const allowed = ["platform_admin", "national_admin", "national_manager", "gis_specialist", "provincial_coordinator", "district_manager", "admin", "manager"];
+    if ((user as any).isPlatformAdmin) return true;
+    const allowed = ["platform_admin", "national_admin", "national_manager", "gis_specialist"];
     return allowed.includes(role) || roles.some((r) => allowed.includes(r));
   }, [user]);
+
+  const userScopedDistrictIds = useMemo(() => {
+    const set = new Set<number>();
+    if (user?.districtId) set.add(Number(user.districtId));
+    if (Array.isArray((user?.dataAccessScope as any)?.districts)) {
+      (user!.dataAccessScope as any).districts.forEach((d: any) => set.add(Number(d)));
+    }
+    if (!isNationalAdminOrManager && inputFacilities && inputFacilities.length > 0) {
+      inputFacilities.forEach((f) => {
+        if (f.districtId) set.add(Number(f.districtId));
+      });
+    }
+    return set;
+  }, [user, inputFacilities, isNationalAdminOrManager]);
+
+  const userScopedProvinceIds = useMemo(() => {
+    const set = new Set<number>();
+    if (user?.provinceId) set.add(Number(user.provinceId));
+    if (Array.isArray((user?.dataAccessScope as any)?.provinces)) {
+      (user!.dataAccessScope as any).provinces.forEach((p: any) => set.add(Number(p)));
+    }
+    if (!isNationalAdminOrManager && inputFacilities && inputFacilities.length > 0) {
+      inputFacilities.forEach((f) => {
+        if ((f as any).provinceId) set.add(Number((f as any).provinceId));
+      });
+    }
+    return set;
+  }, [user, inputFacilities, isNationalAdminOrManager]);
+
+  const userScopedFacilityIds = useMemo(() => {
+    const set = new Set<number>();
+    if (user?.facilityId) set.add(Number(user.facilityId));
+    if (Array.isArray((user?.dataAccessScope as any)?.facilities)) {
+      (user!.dataAccessScope as any).facilities.forEach((f: any) => set.add(Number(f)));
+    }
+    if (!isNationalAdminOrManager && inputFacilities && inputFacilities.length > 0) {
+      inputFacilities.forEach((f) => set.add(Number(f.id)));
+    }
+    return set;
+  }, [user, inputFacilities, isNationalAdminOrManager]);
   const { theme, systemTheme } = useTheme();
   const [, setLocation] = useLocation();
   const mapRef = useRef<L.Map>(null);
@@ -3672,6 +3760,88 @@ export function MapView({
     });
     return map;
   }, [llgs]);
+
+  const provinceNameLookup = useMemo(() => {
+    const map = new Map<string, any>();
+    provinces.forEach((p) => {
+      map.set(normalizeName(p.name), p);
+    });
+    return map;
+  }, [provinces]);
+
+  const userScopedDistrictNames = useMemo(() => {
+    const set = new Set<string>();
+    userScopedDistrictIds.forEach((id) => {
+      const dist = districtLookup.get(Number(id));
+      if (dist?.name) set.add(normalizeName(dist.name));
+    });
+    return set;
+  }, [userScopedDistrictIds, districtLookup]);
+
+  const userScopedProvinceNames = useMemo(() => {
+    const set = new Set<string>();
+    userScopedProvinceIds.forEach((id) => {
+      const prov = provinceLookup.get(Number(id));
+      if (prov?.name) set.add(normalizeName(prov.name));
+    });
+    return set;
+  }, [userScopedProvinceIds, provinceLookup]);
+
+  const userFacilityBbox = useMemo(() => {
+    if (!facilities || facilities.length === 0) return null;
+    let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+    let count = 0;
+    facilities.forEach((f) => {
+      const lat = Number(f.latitude);
+      const lng = Number(f.longitude);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        count++;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+      }
+    });
+    if (count === 0) return null;
+    return {
+      minLat: minLat - 0.35,
+      maxLat: maxLat + 0.35,
+      minLng: minLng - 0.35,
+      maxLng: maxLng + 0.35,
+    };
+  }, [facilities]);
+
+  // Scoped lists for the FilterPanel dropdowns
+  const scopedFilterProvinces = useMemo(() => {
+    if (isNationalAdminOrManager || userScopedProvinceIds.size === 0) return provinces;
+    return provinces.filter((p) => userScopedProvinceIds.has(Number(p.id)));
+  }, [provinces, isNationalAdminOrManager, userScopedProvinceIds]);
+
+  const scopedFilterDistricts = useMemo(() => {
+    if (isNationalAdminOrManager || userScopedDistrictIds.size === 0) return districts;
+    return districts.filter((d) => userScopedDistrictIds.has(Number(d.id)));
+  }, [districts, isNationalAdminOrManager, userScopedDistrictIds]);
+
+  const scopedFilterLlgs = useMemo(() => {
+    if (isNationalAdminOrManager || userScopedDistrictIds.size === 0) return llgs;
+    return llgs.filter((l) => userScopedDistrictIds.has(Number(l.districtId)));
+  }, [llgs, isNationalAdminOrManager, userScopedDistrictIds]);
+
+  // Automatically scope geographic filters to user's assigned jurisdiction
+  useEffect(() => {
+    if (!isNationalAdminOrManager) {
+      if (userScopedDistrictIds.size === 1 && selectedDistrictId === "all") {
+        const singleDistrictId = Array.from(userScopedDistrictIds)[0];
+        setSelectedDistrictId(singleDistrictId);
+        const dist = districtLookup.get(singleDistrictId);
+        if (dist && dist.provinceId) {
+          setSelectedProvinceId(Number(dist.provinceId));
+        }
+      } else if (userScopedProvinceIds.size === 1 && selectedProvinceId === "all") {
+        setSelectedProvinceId(Array.from(userScopedProvinceIds)[0]);
+      }
+    }
+  }, [isNationalAdminOrManager, userScopedDistrictIds, userScopedProvinceIds, districtLookup, selectedDistrictId, selectedProvinceId]);
 
   // Memoized O(1) map associating facilityId to its assigned villages array to avoid O(V*F) nested loops
   const facilityVillagesMap = useMemo(() => {
@@ -4966,7 +5136,13 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
   const visibleHcwCatchments = useMemo(() => {
     if (!layers.hcwCatchments) return [];
     if (!hcwCatchments || hcwCatchments.length === 0) return [];
-    if (!mapBounds) return hcwCatchments;
+
+    let scopedCatchments = hcwCatchments;
+    if (!isNationalAdminOrManager && userScopedFacilityIds.size > 0) {
+      scopedCatchments = hcwCatchments.filter((c) => userScopedFacilityIds.has(Number(c.facilityId)));
+    }
+
+    if (!mapBounds) return scopedCatchments;
 
     const expanded = mapBounds.pad(0.3);
     const boundsLatMin = expanded.getSouth();
@@ -4974,7 +5150,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
     const boundsLngMin = expanded.getWest();
     const boundsLngMax = expanded.getEast();
 
-    return hcwCatchments.filter((c) => {
+    return scopedCatchments.filter((c) => {
       const bbox = catchmentBBoxes.get(c.id);
       if (!bbox) return false;
 
@@ -4987,7 +5163,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
       );
       return overlaps;
     });
-  }, [hcwCatchments, catchmentBBoxes, mapBounds, layers.hcwCatchments]);
+  }, [hcwCatchments, catchmentBBoxes, mapBounds, layers.hcwCatchments, isNationalAdminOrManager, userScopedFacilityIds]);
 
   const districtPopMap = useMemo(() => {
     const m = new Map<number, number>();
@@ -5070,7 +5246,9 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
     const hasLevel3 = availableLevels.includes(3);
 
     let activeAdminLevel = 1;
-    if (selectedProvinceId !== "all" && hasLevel2) {
+    if (!isNationalAdminOrManager && userScopedDistrictIds.size > 0) {
+      activeAdminLevel = 2; // District-scoped users focus on their district boundary
+    } else if (selectedProvinceId !== "all" && hasLevel2) {
       if (selectedDistrictId === "all") {
         activeAdminLevel = 2;
       } else if (hasLevel3) {
@@ -5102,8 +5280,26 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
         const normFName = normalizeName(fName);
 
         if (b.adminLevel === 1) {
+          if (!isNationalAdminOrManager && userScopedProvinceIds.size > 0) {
+            const localProv = provinceNameLookup.get(normFName);
+            if (localProv) {
+              return userScopedProvinceIds.has(Number(localProv.id));
+            }
+            const provId = feature.properties?.provinceId || feature.properties?.id;
+            if (provId && userScopedProvinceIds.has(Number(provId))) return true;
+            return false;
+          }
           return true;
         } else if (b.adminLevel === 2) {
+          if (!isNationalAdminOrManager && userScopedDistrictIds.size > 0) {
+            const localDist = districtNameLookup.get(normFName);
+            if (localDist) {
+              return userScopedDistrictIds.has(Number(localDist.id));
+            }
+            const distId = feature.properties?.districtId || feature.properties?.id;
+            if (distId && userScopedDistrictIds.has(Number(distId))) return true;
+            return false;
+          }
           if (selectedProvinceId === "all") {
             return true;
           }
@@ -5134,6 +5330,15 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
             }
           }
         } else if (b.adminLevel === 3) {
+          if (!isNationalAdminOrManager && userScopedDistrictIds.size > 0) {
+            const localLlg = llgNameLookup.get(normFName);
+            if (localLlg) {
+              return userScopedDistrictIds.has(Number(localLlg.districtId));
+            }
+            const distProp = feature.properties?.district || feature.properties?.DISTRICT || feature.properties?.NAME_2 || feature.properties?.adm2_name || "";
+            const matchedDist = districts.find(d => normalizeName(d.name) === normalizeName(distProp));
+            return matchedDist ? userScopedDistrictIds.has(Number(matchedDist.id)) : false;
+          }
           if (selectedDistrictId === "all") {
             // If province is selected, only show wards in that province
             if (selectedProvinceId !== "all") {
@@ -5214,6 +5419,10 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
     llgLookup,
     districtNameLookup,
     llgNameLookup,
+    provinceNameLookup,
+    isNationalAdminOrManager,
+    userScopedDistrictIds,
+    userScopedProvinceIds,
   ]);
 
   // ─── GRID3 selection-aware emphasis ──────────────────────────────────────
@@ -6307,6 +6516,9 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
 
     // 1. Session plan polygons
     (activeSessionPlans || []).forEach((plan: any) => {
+      if (!isNationalAdminOrManager && userScopedFacilityIds.size > 0 && plan.facilityId) {
+        if (!userScopedFacilityIds.has(Number(plan.facilityId))) return;
+      }
       if (plan?.geojson?.type === "Polygon" && Array.isArray(plan.geojson.coordinates?.[0]) && plan.geojson.coordinates[0].length >= 4) {
         try {
           const areaSqM = turfArea({ type: "Feature", properties: {}, geometry: plan.geojson });
@@ -6326,6 +6538,9 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
     // 2. Community catchment boundary polygons
     if (layers.villages) {
       (activeMapVillages || []).forEach((village: any) => {
+        if (!isNationalAdminOrManager && userScopedDistrictIds.size > 0 && village.districtId) {
+          if (!userScopedDistrictIds.has(Number(village.districtId))) return;
+        }
         const coords = (village as any)?.boundary?.coordinates?.[0];
         if (Array.isArray(coords) && coords.length >= 4) {
           try {
@@ -6347,6 +6562,9 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
     // 3. Saved HCW facility catchments
     if (layers.hcwCatchments && Array.isArray(hcwCatchments)) {
       hcwCatchments.forEach((c: any) => {
+        if (!isNationalAdminOrManager && userScopedFacilityIds.size > 0 && c.facilityId) {
+          if (!userScopedFacilityIds.has(Number(c.facilityId))) return;
+        }
         if (c?.geojson?.type === "Polygon" && Array.isArray(c.geojson.coordinates?.[0]) && c.geojson.coordinates[0].length >= 4) {
           try {
             const areaSqM = turfArea({ type: "Feature", properties: {}, geometry: c.geojson });
@@ -6440,7 +6658,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
     }
 
     return collisions;
-  }, [layers.polygonCollisions, activeSessionPlans, activeMapVillages, layers.villages, layers.hcwCatchments, hcwCatchments]);
+  }, [layers.polygonCollisions, activeSessionPlans, activeMapVillages, layers.villages, layers.hcwCatchments, hcwCatchments, isNationalAdminOrManager, userScopedFacilityIds, userScopedDistrictIds]);
 
   const collidingPolygonEntityIds = useMemo(() => {
     const set = new Set<string>();
@@ -7005,7 +7223,15 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 cacheScope={`custom-${l.id}`}
               />
             ) : (
-              <CustomVectorLayer key={`custom-vector-${l.id}`} id={l.id} style={l.style} />
+              <CustomVectorLayer
+                key={`custom-vector-${l.id}`}
+                id={l.id}
+                style={l.style}
+                userDistrictNames={userScopedDistrictNames}
+                userProvinceNames={userScopedProvinceNames}
+                userBbox={userFacilityBbox}
+                isNational={isNationalAdminOrManager}
+              />
             ),
           )}
 
@@ -7576,6 +7802,11 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
         {/* Active lifecycle polygons saved by the facility/community polygon editor. */}
         {layers.hcwCatchments && lifecyclePolygons.map((polygon: any) => {
           const isFacilityPolygon = polygon.ownerType === "facility";
+          if (!isNationalAdminOrManager) {
+            if (isFacilityPolygon && userScopedFacilityIds.size > 0 && !userScopedFacilityIds.has(Number(polygon.ownerId))) return null;
+            if (!isFacilityPolygon && polygon.parentFacilityId && userScopedFacilityIds.size > 0 && !userScopedFacilityIds.has(Number(polygon.parentFacilityId))) return null;
+            if (polygon.ownerType === "district" && userScopedDistrictIds.size > 0 && !userScopedDistrictIds.has(Number(polygon.ownerId))) return null;
+          }
           if (selectedFacilityId && isFacilityPolygon && Number(polygon.ownerId) !== Number(selectedFacilityId)) return null;
           if (selectedFacilityId && !isFacilityPolygon && Number(polygon.parentFacilityId) !== Number(selectedFacilityId)) return null;
           return (
@@ -7606,6 +7837,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
         {layers.hcwCatchments &&
           visibleHcwCatchments.map((catchment) => {
             const facility = facilities.find((f) => f.id === catchment.facilityId);
+            if (!isNationalAdminOrManager && !facility && userScopedFacilityIds.size > 0 && !userScopedFacilityIds.has(Number(catchment.facilityId))) return null;
             const facilityName = facility?.name || `Health Facility #${catchment.facilityId}`;
 
             // Resolve proper catchment title: replace HF <id> placeholder with real facility name if present
@@ -9376,9 +9608,9 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   onColdChainToggle={() => setFilterColdChain(!filterColdChain)}
                   filterPower={filterPower}
                   onPowerToggle={() => setFilterPower(!filterPower)}
-                  provinces={provinces}
-                  districts={districts}
-                  llgs={llgs}
+                  provinces={scopedFilterProvinces}
+                  districts={scopedFilterDistricts}
+                  llgs={scopedFilterLlgs}
                   facilities={facilities}
                   adminLabels={adminLabels}
                   totalFacilitiesCount={facilities.length}
@@ -9451,9 +9683,9 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 onColdChainToggle={() => setFilterColdChain(!filterColdChain)}
                 filterPower={filterPower}
                 onPowerToggle={() => setFilterPower(!filterPower)}
-                provinces={provinces}
-                districts={districts}
-                llgs={llgs}
+                provinces={scopedFilterProvinces}
+                districts={scopedFilterDistricts}
+                llgs={scopedFilterLlgs}
                 facilities={facilities}
                 adminLabels={adminLabels}
                 totalFacilitiesCount={facilities.length}
