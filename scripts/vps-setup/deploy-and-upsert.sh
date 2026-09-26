@@ -76,6 +76,10 @@ npx tsx --env-file=.env server/migrations/006-seed-demo-operational.ts
 echo "Upserting Zambia demo accounts..."
 npx tsx --env-file=.env scripts/seed-zambia-demo-accounts.ts
 
+echo "Upserting Chunga Rural Health Centre (55020003) operational records..."
+npx tsx --env-file=.env scripts/populate-chunga-facility.ts
+
+
 if [ -f "scripts/seed-ssd-accounts.ts" ]; then
   echo "Upserting South Sudan demo accounts..."
   npx tsx --env-file=.env scripts/seed-ssd-accounts.ts
