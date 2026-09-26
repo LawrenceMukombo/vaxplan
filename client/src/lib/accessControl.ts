@@ -1,4 +1,5 @@
 import type { User } from "@shared/schema";
+import { ROLE_PERMISSIONS } from "@shared/permissions";
 
 type UserWithEffectivePermissions = User & { effectivePermissions?: string[] };
 
@@ -75,8 +76,24 @@ export function permissionsForUser(user: User | null | undefined): Set<string> {
   if (!user) return permissions;
   if ((user as any).isPlatformAdmin === true) permissions.add("*");
   const effective = (user as UserWithEffectivePermissions).effectivePermissions;
-  const raw: string[] = Array.isArray(effective) ? effective : Array.isArray((user as any).permissions) ? (user as any).permissions : [];
+  const hasExplicitEffective = Array.isArray(effective);
+  const raw: string[] = hasExplicitEffective
+    ? effective
+    : Array.isArray((user as any).permissions)
+    ? (user as any).permissions
+    : [];
   raw.map(String).forEach((permission) => expandPermission(permissions, permission));
+
+  // If effectivePermissions were not explicitly calculated on the user object,
+  // fall back to mapping default permissions from ROLE_PERMISSIONS for all user assigned roles.
+  if (!hasExplicitEffective) {
+    const roles = userRoles(user);
+    for (const roleName of roles) {
+      const rolePerms = ROLE_PERMISSIONS[roleName] || [];
+      rolePerms.forEach((permission) => expandPermission(permissions, permission));
+    }
+  }
+
   return permissions;
 }
 
