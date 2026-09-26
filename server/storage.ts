@@ -34,6 +34,7 @@ import {
   sessionDayPlans,
   stockTransactions,
   monthlyReports,
+  facilityStaff,
   notifications,
   type Notification,
   type InsertNotification,
@@ -118,7 +119,7 @@ import type { UserRole } from "@shared/schema";
 import { normalizeStockVaccineName } from "@shared/vaccineSchedule";
 import { isApprovedPlan, approvalEligibility } from "@shared/microplanPolicy";
 import { db } from "./db";
-import { eq, and, or, desc, isNull, inArray, getTableColumns, sql, gte, ne } from "drizzle-orm";
+import { eq, and, or, desc, isNull, isNotNull, inArray, getTableColumns, sql, gte, ne, ilike } from "drizzle-orm";
 
 export interface OnlineUser {
   userId: string | null;
@@ -159,6 +160,8 @@ export interface IStorage {
   updateUser(tenantId: string, id: string, data: any): Promise<User | undefined>;
   setPlatformAdmin(id: string, isPlatformAdmin: boolean): Promise<User | undefined>;
   deleteUser(tenantId: string, id: string): Promise<boolean>;
+  ensureFacilityStaffForUser(user: User): Promise<void>;
+  syncAllUsersToFacilityStaff(tenantId?: string): Promise<{ synced: number }>;
 
   // Tenants & IdP configs (control plane)
   getTenant(id: string): Promise<Tenant | undefined>;
@@ -513,6 +516,9 @@ export class DatabaseStorage implements IStorage {
         set: { ...userData, updatedAt: new Date() },
       })
       .returning();
+    if (user && user.facilityId && user.tenantId) {
+      await this.ensureFacilityStaffForUser(user);
+    }
     return user;
   }
 
@@ -559,6 +565,9 @@ export class DatabaseStorage implements IStorage {
       })
       .where(and(eq(users.id, id), eq(users.tenantId, tenantId)))
       .returning();
+    if (u && u.facilityId) {
+      await this.ensureFacilityStaffForUser(u);
+    }
     return u;
   }
 
@@ -577,6 +586,9 @@ export class DatabaseStorage implements IStorage {
         isActive: data.isActive !== undefined ? data.isActive : true,
       })
       .returning();
+    if (row && row.facilityId) {
+      await this.ensureFacilityStaffForUser(row);
+    }
     return row;
   }
 
@@ -590,6 +602,9 @@ export class DatabaseStorage implements IStorage {
       })
       .where(and(eq(users.id, id), eq(users.tenantId, tenantId)))
       .returning();
+    if (row && row.facilityId) {
+      await this.ensureFacilityStaffForUser(row);
+    }
     return row;
   }
 
@@ -608,7 +623,109 @@ export class DatabaseStorage implements IStorage {
       .set({ isActive: false, updatedAt: new Date() })
       .where(and(eq(users.id, id), eq(users.tenantId, tenantId)))
       .returning({ id: users.id });
+    if (u) {
+      await db
+        .update(facilityStaff)
+        .set({ isActive: false, active: false, updatedAt: new Date() })
+        .where(and(eq(facilityStaff.userId, id), eq(facilityStaff.tenantId, tenantId)));
+    }
     return !!u;
+  }
+
+  async ensureFacilityStaffForUser(user: User): Promise<void> {
+    if (!user.tenantId || !user.facilityId) return;
+
+    const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.email || "Staff Member";
+    const userRole = user.role || (user.roles && user.roles[0]) || "facility_clerk";
+    const phone = (user as any).contactPhone || (user as any).phone || null;
+
+    try {
+      // 1. Check if a staff record already exists for this userId in this tenant
+      const [existingByUserId] = await db
+        .select()
+        .from(facilityStaff)
+        .where(and(eq(facilityStaff.tenantId, user.tenantId), eq(facilityStaff.userId, user.id)));
+
+      if (existingByUserId) {
+        await db
+          .update(facilityStaff)
+          .set({
+            facilityId: user.facilityId,
+            fullName,
+            name: fullName,
+            role: userRole,
+            position: userRole,
+            contactPhone: phone || existingByUserId.contactPhone,
+            phone: phone || existingByUserId.phone,
+            isActive: user.isActive !== false,
+            active: user.isActive !== false,
+            updatedAt: new Date(),
+          })
+          .where(eq(facilityStaff.id, existingByUserId.id));
+        return;
+      }
+
+      // 2. Check if a staff record exists for the same facilityId and fullName without a userId linked
+      const [existingByName] = await db
+        .select()
+        .from(facilityStaff)
+        .where(
+          and(
+            eq(facilityStaff.tenantId, user.tenantId),
+            eq(facilityStaff.facilityId, user.facilityId),
+            ilike(facilityStaff.fullName, fullName)
+          )
+        );
+
+      if (existingByName) {
+        await db
+          .update(facilityStaff)
+          .set({
+            userId: user.id,
+            role: userRole,
+            position: userRole,
+            contactPhone: phone || existingByName.contactPhone,
+            phone: phone || existingByName.phone,
+            isActive: user.isActive !== false,
+            active: user.isActive !== false,
+            updatedAt: new Date(),
+          })
+          .where(eq(facilityStaff.id, existingByName.id));
+        return;
+      }
+
+      // 3. Otherwise insert a new facility_staff record
+      await db.insert(facilityStaff).values({
+        tenantId: user.tenantId,
+        facilityId: user.facilityId,
+        userId: user.id,
+        fullName,
+        name: fullName,
+        position: userRole,
+        role: userRole,
+        contactPhone: phone,
+        phone: phone,
+        campaignRole: "vaccinator",
+        isActive: user.isActive !== false,
+        active: user.isActive !== false,
+      });
+    } catch (err: any) {
+      console.error("[ensureFacilityStaffForUser] Error syncing user to facilityStaff:", err?.message || err);
+    }
+  }
+
+  async syncAllUsersToFacilityStaff(tenantId?: string): Promise<{ synced: number }> {
+    const conditions = [isNotNull(users.facilityId), isNotNull(users.tenantId)];
+    if (tenantId) {
+      conditions.push(eq(users.tenantId, tenantId));
+    }
+    const eligibleUsers = await db.select().from(users).where(and(...conditions));
+    let count = 0;
+    for (const u of eligibleUsers) {
+      await this.ensureFacilityStaffForUser(u);
+      count++;
+    }
+    return { synced: count };
   }
 
   // --- Custom User Roles ---

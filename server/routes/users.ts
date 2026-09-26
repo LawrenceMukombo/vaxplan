@@ -230,6 +230,17 @@ usersRouter.post("/", isAuthenticated, requireTenant, requireAnyPermission(["use
   }
 });
 
+// POST /api/users/sync-staff
+usersRouter.post("/sync-staff", isAuthenticated, requireTenant, requireAnyPermission(["users.create", "users.update", "manage_users"]), async (req: any, res) => {
+  try {
+    const result = await storage.syncAllUsersToFacilityStaff(req.tenantId);
+    res.json({ success: true, message: `Successfully synchronized ${result.synced} users to facility staff roster`, ...result });
+  } catch (err: any) {
+    console.error("POST /api/users/sync-staff failed:", err);
+    res.status(500).json({ message: "Failed to sync users to facility staff" });
+  }
+});
+
 // PATCH /api/users/:id with geographic check on target and body params
 usersRouter.patch("/:id", isAuthenticated, requireTenant, requireAnyPermission(["users.update", "manage_users"]), async (req: any, res) => {
   try {
