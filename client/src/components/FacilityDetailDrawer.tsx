@@ -57,9 +57,9 @@ interface FacilityDetailDrawerProps {
 
 export function FacilityDetailDrawer({
   facility,
-  provinceName = "North West",
-  districtName = "Dr Kenneth Kaunda",
-  countryCode = "ZAF",
+  provinceName = "",
+  districtName = "",
+  countryCode = "",
   districtCoords,
   provinceCoords,
   communityRoutes = [],
@@ -78,7 +78,7 @@ export function FacilityDetailDrawer({
     retry: false,
   });
 
-  const effectiveCountryCode = countryCode || activeTenant?.countryCode || activeTenant?.code || "ZAF";
+  const effectiveCountryCode = countryCode || activeTenant?.countryCode || activeTenant?.code || "ZMB";
 
   // Query live staff roster for this specific facility
   const { data: staffList = [], isLoading: isLoadingStaff } = useQuery<any[]>({

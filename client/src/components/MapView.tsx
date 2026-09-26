@@ -10494,8 +10494,9 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
             {selectedFacilityId ? (
               <FacilityDetailDrawer
                 facility={facilities.find((f) => f.id === selectedFacilityId)}
-                provinceName={provinceLookup.get(Number(districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.provinceId))?.name || "North West"}
-                districtName={districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.name || "Dr Kenneth Kaunda"}
+                provinceName={provinceLookup.get(Number(districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.provinceId))?.name || ""}
+                districtName={districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.name || ""}
+                countryCode={activeTenant?.countryCode || "ZMB"}
                 districtCoords={districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.coordinates as any}
                 provinceCoords={provinceLookup.get(Number(districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.provinceId))?.coordinates as any}
                 communityRoutes={communityRoutes || []}

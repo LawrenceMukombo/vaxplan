@@ -150,28 +150,55 @@ gisPolygonsRouter.post("/suggest", async (req, res) => {
 
     const result = await pool.query(`
       SELECT ST_AsGeoJSON(
-        ST_ConvexHull(
-          ST_Collect(ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326))
+        COALESCE(
+          (
+            SELECT ST_Intersection(
+              ST_ConvexHull(
+                ST_Collect(ST_SetSRID(ST_MakePoint(v.longitude::float, v.latitude::float), 4326))
+              ),
+              b.geometry
+            )
+            FROM facilities f
+            JOIN admin_boundaries b ON (b.id = f.district_id OR b.id::text = f.district_id::text)
+            WHERE f.id = $2
+              AND ST_GeometryType(b.geometry) IN ('ST_Polygon', 'ST_MultiPolygon')
+            LIMIT 1
+          ),
+          ST_ConvexHull(
+            ST_Collect(ST_SetSRID(ST_MakePoint(v.longitude::float, v.latitude::float), 4326))
+          )
         )
       )::jsonb as geometry
-      FROM villages
-      WHERE ($1::int IS NULL OR tenant_id = $1) 
-        AND (assigned_facility_id = $2 OR assigned_facility_id = $2::text) 
-        AND latitude IS NOT NULL AND longitude IS NOT NULL
+      FROM villages v
+      WHERE ($1::int IS NULL OR v.tenant_id = $1) 
+        AND (v.assigned_facility_id = $2 OR v.assigned_facility_id = $2::text) 
+        AND v.latitude IS NOT NULL AND v.longitude IS NOT NULL
     `, [tenantId || null, facilityId]);
     
     let geometry = result.rows[0]?.geometry;
     
-    // If no villages or points form a valid polygon (e.g. fewer than 3 points), fallback to a 5km buffer around the facility itself
+    // If no villages or points form a valid polygon (e.g. fewer than 3 points), fallback to a 5km buffer around the facility itself (clipped to district)
     if (!geometry || geometry.type === "Point" || geometry.type === "LineString") {
       const facResult = await pool.query(`
         SELECT ST_AsGeoJSON(
-          ST_Buffer(ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography, 5000)
+          COALESCE(
+            (
+              SELECT ST_Intersection(
+                ST_Buffer(ST_SetSRID(ST_MakePoint(f.longitude::float, f.latitude::float), 4326)::geography, 5000)::geometry,
+                b.geometry
+              )
+              FROM admin_boundaries b
+              WHERE (b.id = f.district_id OR b.id::text = f.district_id::text)
+                AND ST_GeometryType(b.geometry) IN ('ST_Polygon', 'ST_MultiPolygon')
+              LIMIT 1
+            ),
+            ST_Buffer(ST_SetSRID(ST_MakePoint(f.longitude::float, f.latitude::float), 4326)::geography, 5000)::geometry
+          )
         )::jsonb as geometry
-        FROM facilities
-        WHERE ($1::int IS NULL OR tenant_id = $1) 
-          AND id = $2 
-          AND latitude IS NOT NULL AND longitude IS NOT NULL
+        FROM facilities f
+        WHERE ($1::int IS NULL OR f.tenant_id = $1) 
+          AND f.id = $2 
+          AND f.latitude IS NOT NULL AND f.longitude IS NOT NULL
       `, [tenantId || null, facilityId]);
       
       geometry = facResult.rows[0]?.geometry;

@@ -636,7 +636,7 @@ export class DatabaseStorage implements IStorage {
     if (!user.tenantId || !user.facilityId) return;
 
     const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.email || "Staff Member";
-    const userRole = user.role || (user.roles && user.roles[0]) || "facility_clerk";
+    const userRole = user.role || (user.roles && Array.isArray(user.roles) && user.roles.length > 0 ? (user.roles as string[])[0] : "facility_clerk");
     const phone = (user as any).contactPhone || (user as any).phone || null;
 
     try {

@@ -709,6 +709,36 @@ export interface TravelAnalysisResult {
  * Resolves accurate administrative headquarters and real travel distances
  * from a facility's GPS location to its District HQ, Provincial HQ, and National Capital.
  */
+export function detectCountryCode(lat: number, lng: number, countryCodeInput?: string | null): string {
+  if (countryCodeInput && countryCodeInput.toUpperCase() !== "ZAF") {
+    return countryCodeInput.toUpperCase();
+  }
+  // Bounding box for Zambia: lat -18.5 to -7.5, lng 21.5 to 34.0
+  if (lat >= -18.5 && lat <= -7.5 && lng >= 21.5 && lng <= 34.0) {
+    return "ZMB";
+  }
+  // Bounding box for PNG
+  if (lat >= -12.0 && lat <= 0 && lng >= 140.0 && lng <= 157.0) {
+    return "PNG";
+  }
+  // Bounding box for South Sudan
+  if (lat >= 3.0 && lat <= 13.0 && lng >= 23.0 && lng <= 36.0) {
+    return "SSD";
+  }
+  // Bounding box for Kenya
+  if (lat >= -4.8 && lat <= 5.5 && lng >= 33.9 && lng <= 41.9) {
+    return "KEN";
+  }
+  // Bounding box for DRC
+  if (lat >= -13.5 && lat <= 5.5 && lng >= 12.2 && lng <= 31.3) {
+    return "COD";
+  }
+  if (countryCodeInput && countryCodeInput.trim() !== "") {
+    return countryCodeInput.toUpperCase();
+  }
+  return "ZMB";
+}
+
 export function getAdministrativeHqTravelAnalysis(input: {
   facilityLat: number;
   facilityLng: number;
@@ -719,10 +749,10 @@ export function getAdministrativeHqTravelAnalysis(input: {
   provinceCoords?: { lat: number; lng: number } | null;
 }): TravelAnalysisResult {
   const { facilityLat, facilityLng } = input;
-  const countryCode = (input.countryCode || "ZAF").toUpperCase();
+  const countryCode = detectCountryCode(facilityLat, facilityLng, input.countryCode);
 
   // 1. National Capital
-  const capitalInfo = NATIONAL_CAPITALS[countryCode] || NATIONAL_CAPITALS.ZAF;
+  const capitalInfo = NATIONAL_CAPITALS[countryCode] || NATIONAL_CAPITALS.ZMB || NATIONAL_CAPITALS.ZAF;
   const capDirectKm = calculateHaversineDistanceKm(
     facilityLat,
     facilityLng,

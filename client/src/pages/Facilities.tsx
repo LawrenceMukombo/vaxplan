@@ -2577,15 +2577,16 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
       header: "Assigned Distance",
       sortable: true,
       render: (item: Village) => {
-        if (item.distanceToFacility !== null && item.distanceToFacility !== undefined) {
+        const route = getCommunityRoute(item.id);
+        if (route?.distanceToFacility != null) {
           return (
             <Badge variant="outline" className="font-mono">
-              {Number(item.distanceToFacility).toFixed(2)} km
+              {Number(route.distanceToFacility).toFixed(2)} km
             </Badge>
           );
         }
         if (item.latitude && item.longitude && item.assignedFacilityId) {
-          const fac = facilities?.find(f => f.id === item.assignedFacilityId);
+          const fac = facilities?.find(f => Number(f.id) === Number(item.assignedFacilityId));
           if (fac && fac.latitude !== null && fac.longitude !== null) {
             const dist = getHaversineDistance(
               parseFloat(item.latitude.toString()),
@@ -2599,6 +2600,13 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
               </Badge>
             );
           }
+        }
+        if (item.distanceToFacility !== null && item.distanceToFacility !== undefined) {
+          return (
+            <Badge variant="outline" className="font-mono">
+              {Number(item.distanceToFacility).toFixed(2)} km
+            </Badge>
+          );
         }
         return <span className="text-muted-foreground text-xs">-</span>;
       }
