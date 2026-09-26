@@ -84,6 +84,25 @@ export interface ResolvedSender {
   replyTo?: string;
 }
 
+function cleanEnv(val?: string | null): string {
+  if (!val) return "";
+  return String(val).trim().replace(/^['"]|['"]$/g, "");
+}
+
+function parseEmailString(raw?: string | null): { address?: string; name?: string } {
+  if (!raw) return {};
+  const cleaned = cleanEnv(raw);
+  if (!cleaned) return {};
+  const match = cleaned.match(/^(?:["']?([^"']+)["']?\s+)?<([^>]+)>$/);
+  if (match) {
+    return { name: match[1]?.trim() || undefined, address: match[2]?.trim() };
+  }
+  if (cleaned.includes("@")) {
+    return { address: cleaned };
+  }
+  return {};
+}
+
 export function resolveSender(
   tenant: Tenant | undefined,
   override?: { address: string; name?: string },
@@ -92,13 +111,43 @@ export function resolveSender(
     return { address: override.address, name: override.name };
   }
   const tenantEmail = readTenantEmailSettings(tenant);
-  const address =
-    tenantEmail.fromAddress ||
-    process.env.MAIL_FROM ||
-    process.env.SUPERVISION_DIGEST_FROM /* legacy */ ||
-    "no-reply@vaxplan.app";
-  const name = tenantEmail.fromName || process.env.MAIL_FROM_NAME || tenant?.name;
-  const replyTo = tenantEmail.replyTo || process.env.MAIL_REPLY_TO || undefined;
+
+  // Parse candidate sources in priority order:
+  // 1. tenant settings (fromAddress)
+  // 2. MAIL_FROM
+  // 3. SMTP_FROM
+  // 4. SMTP_USER
+  // 5. SUPERVISION_DIGEST_FROM (legacy)
+  const candidateList = [
+    tenantEmail.fromAddress,
+    process.env.MAIL_FROM,
+    process.env.SMTP_FROM,
+    process.env.SMTP_USER,
+    process.env.SUPERVISION_DIGEST_FROM,
+  ];
+
+  let parsed: { address?: string; name?: string } = {};
+  for (const candidate of candidateList) {
+    const res = parseEmailString(candidate);
+    if (res.address) {
+      parsed = res;
+      break;
+    }
+  }
+
+  const address = parsed.address || "noreply@vaxplan.org";
+  const name =
+    tenantEmail.fromName ||
+    parsed.name ||
+    cleanEnv(process.env.MAIL_FROM_NAME) ||
+    tenant?.name ||
+    "VaxPlan Notifications";
+
+  const replyTo =
+    tenantEmail.replyTo ||
+    cleanEnv(process.env.MAIL_REPLY_TO) ||
+    undefined;
+
   return { address, name, replyTo };
 }
 
@@ -113,13 +162,13 @@ async function sendViaSendgrid(
   input: SendEmailInput,
   sender: ResolvedSender,
 ): Promise<SendEmailResult> {
-  const apiKey = process.env.SENDGRID_API_KEY!;
+  const apiKey = cleanEnv(process.env.SENDGRID_API_KEY);
   const content: Array<{ type: string; value: string }> = [
     { type: "text/plain", value: input.text },
   ];
   if (input.html) content.push({ type: "text/html", value: input.html });
   const payload: Record<string, unknown> = {
-    personalizations: [{ to: [{ email: input.to }] }],
+    personalizations: [{ to: [{ email: input.to.trim() }] }],
     from: sender.name
       ? { email: sender.address, name: sender.name }
       : { email: sender.address },
@@ -136,15 +185,22 @@ async function sendViaSendgrid(
       },
       body: JSON.stringify(payload),
     });
-    if (resp.ok) return { ok: true, channel: "sendgrid" };
+    if (resp.ok) {
+      console.log(`[mailer] Email sent successfully to ${input.to} via SendGrid: "${input.subject}"`);
+      return { ok: true, channel: "sendgrid" };
+    }
     const body = await resp.text().catch(() => "");
+    const detail = `sendgrid http ${resp.status}${body ? `: ${body.slice(0, 200)}` : ""}`;
+    console.error(`[mailer] SendGrid delivery to ${input.to} failed: ${detail}`);
     return {
       ok: false,
       channel: "sendgrid",
-      detail: `sendgrid http ${resp.status}${body ? `: ${body.slice(0, 200)}` : ""}`,
+      detail,
     };
   } catch (err: any) {
-    return { ok: false, channel: "sendgrid", detail: err?.message ?? String(err) };
+    const detail = err?.message ?? String(err);
+    console.error(`[mailer] SendGrid delivery to ${input.to} encountered error: ${detail}`);
+    return { ok: false, channel: "sendgrid", detail };
   }
 }
 
@@ -158,42 +214,108 @@ async function sendViaSmtp(
     const mod: any = await import("nodemailer");
     nodemailer = mod.default ?? mod;
   } catch (err: any) {
+    const detail =
+      "SMTP_HOST is set but the `nodemailer` package is not available. " +
+      "Run `npm install nodemailer` or unset SMTP_HOST to fall back to console.";
+    console.error(`[mailer] ${detail}`);
     return {
       ok: false,
       channel: "smtp",
-      detail:
-        "SMTP_HOST is set but the optional `nodemailer` package is not installed. " +
-        "Run `npm install nodemailer` or unset SMTP_HOST to fall back to console.",
+      detail,
     };
   }
-  const port = parseInt(process.env.SMTP_PORT || "587", 10);
+
+  const host = cleanEnv(process.env.SMTP_HOST || "");
+  const port = parseInt(cleanEnv(process.env.SMTP_PORT || "587"), 10) || 587;
   const secure =
     typeof process.env.SMTP_SECURE === "string"
-      ? process.env.SMTP_SECURE === "true" || process.env.SMTP_SECURE === "1"
+      ? cleanEnv(process.env.SMTP_SECURE) === "true" || cleanEnv(process.env.SMTP_SECURE) === "1"
       : port === 465;
-  const pass = process.env.SMTP_PASSWORD || process.env.SMTP_PASS;
-  const auth =
-    process.env.SMTP_USER && pass
-      ? { user: process.env.SMTP_USER, pass }
-      : undefined;
-  const transport = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port,
-    secure,
-    auth,
-  });
+
+  const rawUser = cleanEnv(process.env.SMTP_USER || "");
+  const user = rawUser.replace(/[\u200B-\u200D\uFEFF\u00A0]/g, "");
+  const rawPass = cleanEnv(process.env.SMTP_PASSWORD || process.env.SMTP_PASS || "");
+  const pass = rawPass.replace(/[\s\u00A0\u200B-\u200D\uFEFF]/g, "");
+
+  const auth = user && pass ? { user, pass } : undefined;
+
+  const fromFormatted = formatAddress(sender.address, sender.name);
+  const mailOptions = {
+    from: fromFormatted,
+    to: input.to.trim(),
+    subject: input.subject,
+    text: input.text,
+    html: input.html,
+    replyTo: sender.replyTo,
+  };
+
+  const isGmail = host.toLowerCase().includes("gmail") || user.toLowerCase().endsWith("@gmail.com");
+
   try {
-    await transport.sendMail({
-      from: formatAddress(sender.address, sender.name),
-      to: input.to,
-      subject: input.subject,
-      text: input.text,
-      html: input.html,
-      replyTo: sender.replyTo,
-    });
-    return { ok: true, channel: "smtp" };
-  } catch (err: any) {
-    return { ok: false, channel: "smtp", detail: err?.message ?? String(err) };
+    const transport = isGmail
+      ? nodemailer.createTransport({
+          service: "gmail",
+          auth,
+          tls: { rejectUnauthorized: false },
+          connectionTimeout: 20000,
+          greetingTimeout: 20000,
+          socketTimeout: 30000,
+        })
+      : nodemailer.createTransport({
+          host,
+          port,
+          secure,
+          auth,
+          tls: { rejectUnauthorized: false },
+          connectionTimeout: 20000,
+          greetingTimeout: 20000,
+          socketTimeout: 30000,
+        });
+
+    const info = await transport.sendMail(mailOptions);
+    console.log(
+      `[mailer] Email sent successfully to ${input.to} via SMTP (${host}:${port}): "${input.subject}" [msgId: ${info?.messageId || "ok"}]`
+    );
+    return { ok: true, channel: "smtp", detail: info?.messageId };
+  } catch (primaryErr: any) {
+    const primaryMsg = primaryErr?.message ?? String(primaryErr);
+    console.warn(`[mailer] Primary SMTP delivery to ${input.to} (${host}:${port}) failed: ${primaryMsg}`);
+
+    // If port 465 timed out or network error, attempt fallback to port 587 (or vice-versa)
+    const isNetworkOrTimeout =
+      primaryErr?.code === "ETIMEDOUT" ||
+      primaryErr?.code === "ESOCKET" ||
+      primaryErr?.code === "ECONNREFUSED" ||
+      primaryErr?.code === "ECONNRESET";
+
+    if (isNetworkOrTimeout && (port === 465 || port === 587)) {
+      const fallbackPort = port === 465 ? 587 : 465;
+      const fallbackSecure = fallbackPort === 465;
+      console.log(`[mailer] Attempting fallback to ${host}:${fallbackPort}...`);
+      try {
+        const fallbackTransport = nodemailer.createTransport({
+          host,
+          port: fallbackPort,
+          secure: fallbackSecure,
+          auth,
+          tls: { rejectUnauthorized: false },
+          connectionTimeout: 20000,
+          greetingTimeout: 20000,
+          socketTimeout: 30000,
+        });
+        const fallbackInfo = await fallbackTransport.sendMail(mailOptions);
+        console.log(
+          `[mailer] Fallback SMTP email sent successfully to ${input.to} (${host}:${fallbackPort}): "${input.subject}"`
+        );
+        return { ok: true, channel: "smtp", detail: fallbackInfo?.messageId };
+      } catch (fallbackErr: any) {
+        const fallbackMsg = fallbackErr?.message ?? String(fallbackErr);
+        console.error(`[mailer] Fallback SMTP delivery also failed: ${fallbackMsg}`);
+      }
+    }
+
+    console.error(`[mailer] Final SMTP failure to ${input.to}: ${primaryMsg}`);
+    return { ok: false, channel: "smtp", detail: primaryMsg };
   }
 }
 
@@ -216,14 +338,21 @@ function logToConsole(input: SendEmailInput, sender: ResolvedSender): SendEmailR
  * audit the channel used.
  */
 export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
-  if (!input.to) {
+  if (!input.to || !input.to.trim()) {
+    console.warn("[mailer] sendEmail called without recipient address");
     return { ok: false, channel: "console", detail: "no recipient address" };
   }
   const tenant = await loadTenant(input);
   const sender = resolveSender(tenant, input.fromOverride);
 
   if (process.env.SENDGRID_API_KEY) {
-    return sendViaSendgrid(input, sender);
+    const res = await sendViaSendgrid(input, sender);
+    if (res.ok) return res;
+    console.warn(`[mailer] SendGrid failed (${res.detail}); checking SMTP fallback...`);
+    if (process.env.SMTP_HOST) {
+      return sendViaSmtp(input, sender);
+    }
+    return res;
   }
   if (process.env.SMTP_HOST) {
     return sendViaSmtp(input, sender);

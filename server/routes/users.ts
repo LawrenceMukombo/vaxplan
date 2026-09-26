@@ -7,6 +7,7 @@ import { ROLE_PERMISSIONS } from "@shared/permissions";
 import { isAuthenticated } from "../auth";
 import { requireTenant } from "../auth/tenantResolver";
 import { refreshTenantRolesCache } from "../auth/authorization";
+import { notifyUserAccountCreated } from "../services/notificationService";
 import {
   logAudit,
   getGeoScope,
@@ -199,6 +200,29 @@ usersRouter.post("/", isAuthenticated, requireTenant, requireAnyPermission(["use
       provinceId: provinceId || null,
     });
     await logAudit(req, "create_user", "users", user.id, null, user);
+
+    // Send email & in-app notification to the newly created user's registered email
+    storage.getTenant(req.tenantId)
+      .then((currentTenant) => {
+        const adminName = req.dbUser
+          ? [req.dbUser.firstName, req.dbUser.lastName].filter(Boolean).join(" ").trim() || req.dbUser.email
+          : undefined;
+        return notifyUserAccountCreated({
+          user: {
+            id: user.id,
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            roles: user.roles,
+            role: user.role,
+            tenantId: req.tenantId,
+          },
+          tenant: currentTenant || undefined,
+          createdByAdminName: adminName,
+        });
+      })
+      .catch((err) => console.error("[users] notifyUserAccountCreated error:", err?.message || err));
+
     res.status(201).json(user);
   } catch (err: any) {
     console.error("POST /api/users failed:", err);

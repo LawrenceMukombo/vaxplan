@@ -6,6 +6,11 @@ import { users } from "@shared/schema";
 import { storage } from "../storage";
 import { isAuthenticated } from "../auth";
 import { tenantContext } from "./tenantResolver";
+import {
+  notifyUserPasswordChanged,
+  notifyUserLoginDetected,
+  notifyUserPasswordResetRequested,
+} from "../services/notificationService";
 
 const BCRYPT_ROUNDS = 12;
 const MIN_PASSWORD_LEN = 8;
@@ -269,6 +274,31 @@ export function registerPasswordAuthRoutes(app: Express) {
             tenantId: userTenantId,
             isPlatformAdmin: !!dbUser.isPlatformAdmin,
           };
+
+          const clientIp =
+            (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+            req.ip ||
+            null;
+          const userAgent = req.headers["user-agent"] || null;
+
+          // Asynchronously notify user of login event
+          storage
+            .getTenant(userTenantId)
+            .then((tenantObj) =>
+              notifyUserLoginDetected({
+                user: {
+                  id: dbUser.id,
+                  email: dbUser.email,
+                  firstName: dbUser.firstName,
+                  lastName: dbUser.lastName,
+                  tenantId: userTenantId,
+                },
+                clientIp,
+                userAgent,
+                tenant: tenantObj || undefined,
+              })
+            )
+            .catch((e) => console.error("[password-auth] notifyUserLoginDetected error:", e?.message || e));
           if (reqAny.session && typeof reqAny.session.save === "function") {
             reqAny.session.save((saveErr: any) => {
               if (saveErr) {
@@ -337,6 +367,15 @@ export function registerPasswordAuthRoutes(app: Express) {
                 null,
             } as any)
             .catch((e) => console.error("[password-auth] reset audit log failed:", e));
+
+          const userTenant = await storage.getTenant(dbUser.tenantId).catch(() => undefined);
+          const fullName = [dbUser.firstName, dbUser.lastName].filter(Boolean).join(" ").trim() || dbUser.email;
+          notifyUserPasswordResetRequested({
+            email: emailRaw,
+            fullName,
+            clientIp: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || null,
+            tenant: userTenant || undefined,
+          }).catch((e) => console.error("[password-auth] notifyUserPasswordResetRequested error:", e?.message || e));
         }
       }
     } catch (err) {
@@ -409,6 +448,32 @@ export function registerPasswordAuthRoutes(app: Express) {
 
       const hash = await hashPassword(newPassword);
       await db.update(users).set({ passwordHash: hash, updatedAt: new Date() }).where(eq(users.id, target.id));
+
+      const clientIp =
+        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+        req.ip ||
+        null;
+      const targetTenantId = target.tenantId || operatingTenantId || "";
+      storage
+        .getTenant(targetTenantId)
+        .then((tenantObj) =>
+          notifyUserPasswordChanged({
+            user: {
+              id: target.id,
+              email: target.email,
+              firstName: target.firstName,
+              lastName: target.lastName,
+              tenantId: target.tenantId,
+            },
+            isResetByAdmin: !isSelf,
+            changedBy: isSelf
+              ? undefined
+              : { firstName: caller.firstName, lastName: caller.lastName, email: caller.email },
+            clientIp,
+            tenant: tenantObj || undefined,
+          })
+        )
+        .catch((e) => console.error("[password-auth] set-password notifyUserPasswordChanged error:", e?.message || e));
       return res.json({ ok: true, userId: target.id });
     } catch (err) {
       console.error("[password-auth] set-password failed:", err);
@@ -452,6 +517,29 @@ export function registerPasswordAuthRoutes(app: Express) {
 
       const hash = await hashPassword(newPassword);
       await db.update(users).set({ passwordHash: hash, updatedAt: new Date() }).where(eq(users.id, caller.id));
+
+      const clientIp =
+        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+        req.ip ||
+        null;
+      const callerTenantId = caller.tenantId || req.tenantId || "";
+      storage
+        .getTenant(callerTenantId)
+        .then((tenantObj) =>
+          notifyUserPasswordChanged({
+            user: {
+              id: caller.id,
+              email: caller.email,
+              firstName: caller.firstName,
+              lastName: caller.lastName,
+              tenantId: caller.tenantId,
+            },
+            isResetByAdmin: false,
+            clientIp,
+            tenant: tenantObj || undefined,
+          })
+        )
+        .catch((e) => console.error("[password-auth] change-password notifyUserPasswordChanged error:", e?.message || e));
       return res.json({ ok: true });
     } catch (err) {
       console.error("[password-auth] change-password failed:", err);
