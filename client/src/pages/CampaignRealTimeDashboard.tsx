@@ -904,45 +904,50 @@ export default function CampaignRealTimeDashboard() {
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl space-y-8">
       {/* Header & Live Control Center */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-6 border-b">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <div className="h-10 w-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 pb-6 border-b border-border/80">
+        <div className="space-y-2 max-w-3xl">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20 border border-white/20">
               <Activity className="h-5 w-5" />
             </div>
-            <h1 className="text-2xl font-bold tracking-tight">Real-Time Campaign Dashboard</h1>
-            <Badge variant="outline" className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border-none">
-              Near Real-Time Operations Monitor
-            </Badge>
-            {isSuperUser ? (
-              <Badge className="bg-purple-600 text-white gap-1 text-[11px] py-0.5 px-2">
-                <ShieldAlert className="h-3 w-3" />
-                Super User CRUD
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 dark:from-white dark:via-slate-100 dark:to-slate-300 bg-clip-text text-transparent">
+              Real-Time Campaign Dashboard
+            </h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="bg-blue-50/80 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800/60 font-semibold px-2.5 py-0.5 rounded-full gap-1.5 shadow-2xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Live Operations Monitor
               </Badge>
-            ) : (
-              <Badge variant="outline" className="text-muted-foreground gap-1 text-[11px]">
-                <Lock className="h-3 w-3" />
-                Read-Only Telemetry
-              </Badge>
-            )}
+              {isSuperUser ? (
+                <Badge className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white gap-1.5 text-xs font-semibold py-0.5 px-2.5 rounded-full shadow-2xs border-0">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  Super User Mode
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="bg-muted/50 text-muted-foreground gap-1.5 text-xs font-medium py-0.5 px-2.5 rounded-full border-border/60">
+                  <Lock className="h-3.5 w-3.5" />
+                  Read-Only Telemetry
+                </Badge>
+              )}
+            </div>
           </div>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-slate-500 dark:text-slate-400 font-normal leading-relaxed">
             Live monitoring of vaccinated cohorts, health facility reporting completeness, and supportive supervision field alerts across all administrative tiers.
           </p>
         </div>
 
         {/* Campaign Switcher & Action Tools */}
         <div className="flex flex-wrap items-center gap-2.5">
-          <div className="flex items-center gap-2 bg-card p-1.5 px-3 rounded-xl border shadow-xs">
-            <Sparkles className="h-4 w-4 text-purple-600" />
-            <span className="text-xs font-semibold text-muted-foreground">Campaign:</span>
+          <div className="flex items-center gap-2.5 bg-background dark:bg-slate-900 backdrop-blur-md p-1.5 px-3.5 rounded-xl border border-border/80 shadow-2xs hover:border-purple-500/40 transition-all">
+            <Sparkles className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Campaign:</span>
             <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
-              <SelectTrigger className="w-[280px] h-8 text-xs font-semibold border-none shadow-none bg-transparent">
+              <SelectTrigger className="w-[240px] sm:w-[280px] h-8 text-xs font-semibold border-none shadow-none bg-transparent focus:ring-0">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="rounded-xl border-border/80 shadow-lg">
                 {campaignList.map((c) => (
-                  <SelectItem key={c.id} value={c.id} className="text-xs">
+                  <SelectItem key={c.id} value={c.id} className="text-xs font-medium py-2">
                     {c.name}
                   </SelectItem>
                 ))}
@@ -968,9 +973,9 @@ export default function CampaignRealTimeDashboard() {
                 setFormTargetAges(activeCampaign.targetAges);
                 setCampaignModalOpen(true);
               }}
-              className="gap-1.5 text-xs font-medium"
+              className="gap-2 text-xs font-semibold h-9 px-3.5 rounded-xl border-border/80 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shadow-2xs"
             >
-              <Settings2 className="h-3.5 w-3.5" />
+              <Settings2 className="h-3.5 w-3.5 text-slate-600 dark:text-slate-400" />
               Configure Campaign
             </Button>
           )}
@@ -978,7 +983,6 @@ export default function CampaignRealTimeDashboard() {
           {/* Super-User Create Campaign Button */}
           {isSuperUser && (
             <Button
-              variant="outline"
               size="sm"
               onClick={() => {
                 setIsCreatingNewCampaign(true);
@@ -993,9 +997,9 @@ export default function CampaignRealTimeDashboard() {
                 setFormTargetAges("9 to 59 months");
                 setCampaignModalOpen(true);
               }}
-              className="gap-1.5 text-xs font-medium bg-purple-50 text-purple-700 dark:bg-purple-950/40 hover:bg-purple-100"
+              className="gap-2 text-xs font-semibold h-9 px-3.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-700 hover:to-indigo-700 shadow-sm border-0 transition-all hover:shadow-purple-500/20"
             >
-              <Plus className="h-3.5 w-3.5" />
+              <Plus className="h-4 w-4" />
               New Campaign
             </Button>
           )}
@@ -1005,9 +1009,9 @@ export default function CampaignRealTimeDashboard() {
             size="sm"
             onClick={handleManualRefresh}
             disabled={isRefreshing}
-            className="gap-1.5 text-xs font-medium"
+            className="gap-2 text-xs font-semibold h-9 px-3.5 rounded-xl border-border/80 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shadow-2xs"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-3.5 w-3.5 text-slate-600 dark:text-slate-400 ${isRefreshing ? "animate-spin text-purple-600" : ""}`} />
             {isRefreshing ? "Refreshing..." : "Refresh"}
           </Button>
         </div>
