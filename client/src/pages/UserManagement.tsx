@@ -693,7 +693,8 @@ export default function UserManagement() {
   const { user: currentUser } = useAuth();
   // Who may see the admin password create/reset controls. The SERVER is the
   // real security boundary: `/api/auth/set-password` only authorizes platform
-  // admins (any tenant) and national admins / program managers in their own
+  // admins (any tenant) and national administrators / programme coordinators
+  // in their own
   // home tenant, and rejects cross-tenant writes with a 403 that the reset
   // mutation surfaces as a toast.
   //
@@ -716,8 +717,10 @@ export default function UserManagement() {
   const hasPasswordRole =
     currentUser?.role === "national_admin" ||
     (currentUser?.role as string) === "national_program_manager" ||
+    (currentUser?.role as string) === "national_manager" ||
     currentUserRoles.includes("national_admin") ||
-    currentUserRoles.includes("national_program_manager");
+    currentUserRoles.includes("national_program_manager") ||
+    currentUserRoles.includes("national_manager");
   const canManagePasswords = isPlatformAdmin || hasPasswordRole;
   const canCreateUsers = hasAnyPermission(currentUser as any, ["users.create", "manage_users"]);
   const canUpdateUsers = hasAnyPermission(currentUser as any, ["users.update", "users.assign_roles", "users.assign_permissions", "manage_users"]);

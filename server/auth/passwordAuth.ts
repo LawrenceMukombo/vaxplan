@@ -378,8 +378,10 @@ export function registerPasswordAuthRoutes(app: Express) {
       const isNationalAdminRole =
         callerRoleStr === "national_admin" ||
         callerRoleStr === "national_program_manager" ||
+        callerRoleStr === "national_manager" ||
         callerRoles.includes("national_admin") ||
-        callerRoles.includes("national_program_manager");
+        callerRoles.includes("national_program_manager") ||
+        callerRoles.includes("national_manager");
 
       // Tenant scope MUST match the other user-management routes
       // (POST/PATCH/DELETE /api/users), which authorize a national admin to
