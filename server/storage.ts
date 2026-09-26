@@ -1067,6 +1067,7 @@ export class DatabaseStorage implements IStorage {
         withTenant(
           villages,
           tenantId,
+          eq(villages.isActive, true),
           districtId ? eq(villages.districtId, districtId) : undefined,
           facilityId ? eq(villages.assignedFacilityId, facilityId) : undefined,
         ),
@@ -1098,7 +1099,7 @@ export class DatabaseStorage implements IStorage {
         )`.mapWith(Number),
       })
       .from(villages)
-      .where(and(eq(villages.id, id), eq(villages.tenantId, tenantId)));
+      .where(and(eq(villages.id, id), eq(villages.tenantId, tenantId), eq(villages.isActive, true)));
     return v as unknown as Village;
   }
   async createVillage(tenantId: string, data: InsertVillage): Promise<Village> {
@@ -1121,6 +1122,9 @@ export class DatabaseStorage implements IStorage {
       .set({ isActive: false, updatedAt: new Date() })
       .where(and(eq(villages.id, id), eq(villages.tenantId, tenantId)))
       .returning({ id: villages.id });
+    if (v) {
+      void this.refreshFacilityPopulationAggregate(tenantId, id);
+    }
     return !!v;
   }
   async createCatchmentConflict(tenantId: string, data: InsertCatchmentConflict): Promise<CatchmentConflict> {

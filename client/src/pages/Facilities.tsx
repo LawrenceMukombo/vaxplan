@@ -890,7 +890,9 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
       return apiRequest("DELETE", `/api/villages/${id}`);
     },
     onSuccess: (_res, id) => {
-      queryClient.setQueryData<Village[]>(["/api/villages"], (old) => old?.filter((v) => Number(v.id) !== Number(id)));
+      queryClient.setQueriesData<Village[]>({ queryKey: ["/api/villages"] }, (old) =>
+        Array.isArray(old) ? old.filter((v) => Number(v.id) !== Number(id)) : old
+      );
       invalidateCommunityCaches();
       setDeletingCommunity(null);
       toast({
