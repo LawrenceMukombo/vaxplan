@@ -102,7 +102,43 @@ export function registerFacilityRoutes(app: Express) {
       //   facility_clerk/in_charge → scope.facilityIds = their single facility
       const scope = await getGeoScope(dbUser, req.tenantId);
       const all = await storage.getFacilities(req.tenantId, districtId);
-      const rawResult = scope.all ? all : all.filter((f) => scope.facilityIds.has(f.id));
+      let rawResult = scope.all ? all : all.filter((f) => scope.facilityIds.has(f.id));
+
+      if (req.query.includeNeighbors === "true" && !scope.all && scope.facilityIds.size > 0) {
+        const neighborSet = new Set<number>(scope.facilityIds);
+        for (const fid of Array.from(scope.facilityIds)) {
+          const userFac = all.find((f) => Number(f.id) === Number(fid));
+          if (userFac) {
+            const facDistrictId = userFac.districtId ? Number(userFac.districtId) : undefined;
+            const fromLat = Number(userFac.latitude);
+            const fromLng = Number(userFac.longitude);
+
+            let candidates = all.filter(
+              (candidate) =>
+                Number(candidate.id) !== Number(fid) &&
+                (!facDistrictId || Number(candidate.districtId) === facDistrictId)
+            );
+            if (candidates.length === 0) {
+              candidates = all.filter((candidate) => Number(candidate.id) !== Number(fid));
+            }
+
+            if (!isNaN(fromLat) && !isNaN(fromLng)) {
+              candidates
+                .filter((c) => !isNaN(Number(c.latitude)) && !isNaN(Number(c.longitude)))
+                .map((c) => ({
+                  id: c.id,
+                  dist: calculateHaversineDistance(fromLat, fromLng, Number(c.latitude), Number(c.longitude)),
+                }))
+                .sort((a, b) => a.dist - b.dist)
+                .slice(0, 5)
+                .forEach((n) => neighborSet.add(n.id));
+            } else {
+              candidates.slice(0, 5).forEach((c) => neighborSet.add(c.id));
+            }
+          }
+        }
+        rawResult = all.filter((f) => neighborSet.has(f.id));
+      }
 
       // Deduplicate facilities with uppercase type suffixes (e.g. "Ateda PHCU" vs "Ateda Phcu")
       // Prioritizing canonical titlecase entries over all-caps abbreviations

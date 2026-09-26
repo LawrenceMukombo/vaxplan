@@ -352,6 +352,17 @@ const getBoundaryStyle = (adminLevel: number, mode?: string) => {
   };
 };
 
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 const createFacilityClusterIcon = function (cluster: any) {
   const count = cluster.getChildCount();
   const size = count > 100 ? 40 : count > 50 ? 34 : count > 10 ? 28 : 22;
@@ -2567,6 +2578,10 @@ export function MapView({
     if (Array.isArray((user?.dataAccessScope as any)?.districts)) {
       (user!.dataAccessScope as any).districts.forEach((d: any) => set.add(Number(d)));
     }
+    if (user?.facilityId && inputFacilities && inputFacilities.length > 0) {
+      const fac = inputFacilities.find((f) => Number(f.id) === Number(user.facilityId));
+      if (fac?.districtId) set.add(Number(fac.districtId));
+    }
     if (!isNationalAdminOrManager && inputFacilities && inputFacilities.length > 0) {
       inputFacilities.forEach((f) => {
         if (f.districtId) set.add(Number(f.districtId));
@@ -2600,6 +2615,96 @@ export function MapView({
     }
     return set;
   }, [user, inputFacilities, isNationalAdminOrManager]);
+
+  const userJurisdictionLevel = useMemo<"national" | "provincial" | "district" | "facility">(() => {
+    if (isNationalAdminOrManager) return "national";
+    const role = (user?.role || "").toLowerCase();
+    const roles: string[] = Array.isArray(user?.roles) ? user.roles.map((r: any) => String(r).toLowerCase()) : [];
+
+    // Facility Level: user has facilityId, or facility role
+    const isHF = Boolean(
+      user?.facilityId ||
+      role === "facility_clerk" ||
+      role === "facility_in_charge" ||
+      role === "facility_partner" ||
+      role === "facility_manager" ||
+      role === "nurse" ||
+      role === "health_worker" ||
+      roles.some((r) => r.startsWith("facility_"))
+    );
+    if (isHF) return "facility";
+
+    // District Level: user has districtId or district role
+    const isDist = Boolean(
+      role === "district_manager" ||
+      role === "district_partner" ||
+      roles.some((r) => r.startsWith("district_")) ||
+      (user?.districtId && !user?.facilityId) ||
+      (userScopedDistrictIds.size > 0 && userScopedFacilityIds.size === 0)
+    );
+    if (isDist) return "district";
+
+    // Provincial Level: user has provinceId or provincial role
+    const isProv = Boolean(
+      role === "provincial_coordinator" ||
+      role === "provincial_partner" ||
+      roles.some((r) => r.startsWith("provincial_")) ||
+      (user?.provinceId && !user?.districtId && !user?.facilityId) ||
+      (userScopedProvinceIds.size > 0 && userScopedDistrictIds.size === 0)
+    );
+    if (isProv) return "provincial";
+
+    return "national";
+  }, [isNationalAdminOrManager, user, userScopedFacilityIds, userScopedDistrictIds, userScopedProvinceIds]);
+
+  const userPrimaryFacilityId = useMemo(() => {
+    if (user?.facilityId) return Number(user.facilityId);
+    if (userScopedFacilityIds.size > 0) return Array.from(userScopedFacilityIds)[0];
+    return null;
+  }, [user, userScopedFacilityIds]);
+
+  const hfAllowedFacilityIds = useMemo(() => {
+    if (userJurisdictionLevel !== "facility" || !userPrimaryFacilityId) {
+      return null;
+    }
+
+    const set = new Set<number>();
+    set.add(userPrimaryFacilityId);
+
+    const ownFacility = facilities.find((f) => Number(f.id) === userPrimaryFacilityId);
+    if (ownFacility && ownFacility.latitude != null && ownFacility.longitude != null) {
+      const ownLat = Number(ownFacility.latitude);
+      const ownLng = Number(ownFacility.longitude);
+
+      const candidates = facilities
+        .filter((c) =>
+          Number(c.id) !== userPrimaryFacilityId &&
+          c.latitude != null &&
+          c.longitude != null &&
+          !isNaN(Number(c.latitude)) &&
+          !isNaN(Number(c.longitude))
+        )
+        .map((c) => ({
+          id: Number(c.id),
+          districtId: c.districtId ? Number(c.districtId) : undefined,
+          distanceKm: haversineKm(ownLat, ownLng, Number(c.latitude), Number(c.longitude)),
+        }))
+        .sort((a, b) => a.distanceKm - b.distanceKm);
+
+      const sameDistrictCandidates = candidates.filter(
+        (c) => ownFacility.districtId && c.districtId === Number(ownFacility.districtId)
+      );
+      const chosenNeighbors = (sameDistrictCandidates.length > 0 ? sameDistrictCandidates : candidates).slice(0, 5);
+      chosenNeighbors.forEach((n) => set.add(n.id));
+    } else {
+      facilities
+        .filter((f) => Number(f.id) !== userPrimaryFacilityId && ownFacility?.districtId && Number(f.districtId) === Number(ownFacility.districtId))
+        .slice(0, 5)
+        .forEach((f) => set.add(Number(f.id)));
+    }
+
+    return set;
+  }, [userJurisdictionLevel, userPrimaryFacilityId, facilities]);
   const { theme, systemTheme } = useTheme();
   const [, setLocation] = useLocation();
   const mapRef = useRef<L.Map>(null);
@@ -3830,18 +3935,32 @@ export function MapView({
   // Automatically scope geographic filters to user's assigned jurisdiction
   useEffect(() => {
     if (!isNationalAdminOrManager) {
-      if (userScopedDistrictIds.size === 1 && selectedDistrictId === "all") {
-        const singleDistrictId = Array.from(userScopedDistrictIds)[0];
-        setSelectedDistrictId(singleDistrictId);
-        const dist = districtLookup.get(singleDistrictId);
-        if (dist && dist.provinceId) {
-          setSelectedProvinceId(Number(dist.provinceId));
+      if (userJurisdictionLevel === "facility") {
+        if (userScopedDistrictIds.size >= 1 && selectedDistrictId === "all") {
+          const singleDistrictId = Array.from(userScopedDistrictIds)[0];
+          setSelectedDistrictId(singleDistrictId);
+          const dist = districtLookup.get(singleDistrictId);
+          if (dist && dist.provinceId) {
+            setSelectedProvinceId(Number(dist.provinceId));
+          }
         }
-      } else if (userScopedProvinceIds.size === 1 && selectedProvinceId === "all") {
-        setSelectedProvinceId(Array.from(userScopedProvinceIds)[0]);
+      } else if (userJurisdictionLevel === "district") {
+        if (userScopedDistrictIds.size === 1 && selectedDistrictId === "all") {
+          const singleDistrictId = Array.from(userScopedDistrictIds)[0];
+          setSelectedDistrictId(singleDistrictId);
+          const dist = districtLookup.get(singleDistrictId);
+          if (dist && dist.provinceId) {
+            setSelectedProvinceId(Number(dist.provinceId));
+          }
+        }
+      } else if (userJurisdictionLevel === "provincial") {
+        if (userScopedProvinceIds.size >= 1 && selectedProvinceId === "all") {
+          const singleProvinceId = Array.from(userScopedProvinceIds)[0];
+          setSelectedProvinceId(singleProvinceId);
+        }
       }
     }
-  }, [isNationalAdminOrManager, userScopedDistrictIds, userScopedProvinceIds, districtLookup, selectedDistrictId, selectedProvinceId]);
+  }, [isNationalAdminOrManager, userJurisdictionLevel, userScopedDistrictIds, userScopedProvinceIds, districtLookup, selectedDistrictId, selectedProvinceId]);
 
   // Memoized O(1) map associating facilityId to its assigned villages array to avoid O(V*F) nested loops
   const facilityVillagesMap = useMemo(() => {
@@ -4151,6 +4270,11 @@ export function MapView({
   // Updated Code: High-performance O(1) filteredFacilities utilizing pre-computed facilityVillagesMap index
   const filteredFacilities = useMemo(() => {
     return facilities.filter((f) => {
+      // For HF user: strictly show their HF and immediate neighbors!
+      if (userJurisdictionLevel === "facility" && hfAllowedFacilityIds) {
+        return hfAllowedFacilityIds.has(Number(f.id));
+      }
+
       if (selectedProvinceId !== "all") {
         if (districtLookup.size === 0) return true;
         const dist = districtLookup.get(Number(f.districtId));
@@ -4188,7 +4312,7 @@ export function MapView({
       if (filterPower && !f.hasPower) return false;
       return true;
     });
-  }, [facilities, selectedProvinceId, selectedDistrictId, selectedLlgId, searchQuery, filterColdChain, filterPower, districtLookup, llgLookup, facilityVillagesMap]);
+  }, [facilities, userJurisdictionLevel, hfAllowedFacilityIds, selectedProvinceId, selectedDistrictId, selectedLlgId, searchQuery, filterColdChain, filterPower, districtLookup, llgLookup, facilityVillagesMap]);
 
   // Visible facilities after applying interactive legend hiddenCategories filters
   const visibleFacilities = useMemo(() => {
@@ -5246,8 +5370,8 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
     const hasLevel3 = availableLevels.includes(3);
 
     let activeAdminLevel = 1;
-    if (!isNationalAdminOrManager && userScopedDistrictIds.size > 0) {
-      activeAdminLevel = 2; // District-scoped users focus on their district boundary
+    if (userJurisdictionLevel === "district" || userJurisdictionLevel === "facility") {
+      activeAdminLevel = 2; // District-scoped and HF users focus on their district boundary
     } else if (selectedProvinceId !== "all" && hasLevel2) {
       if (selectedDistrictId === "all") {
         activeAdminLevel = 2;
@@ -5258,13 +5382,26 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
       }
     }
 
+    const isBoundaryLevelVisible = (adminLevel: number) => {
+      if (!layers.boundaries) return false;
+      if (userJurisdictionLevel === "provincial") {
+        // Provincial user sees both Province shapefile (Level 1) AND District shapefiles (Level 2)
+        return adminLevel === 1 || adminLevel === 2;
+      }
+      if (userJurisdictionLevel === "district" || userJurisdictionLevel === "facility") {
+        // District and HF users only see their district shapefile (Level 2)
+        return adminLevel === 2;
+      }
+      return adminLevel === activeAdminLevel;
+    };
+
     boundaryList.forEach((b) => {
       const geojson = boundaryGeoJSONs[b.id];
       if (!geojson) return;
 
       // Process if it is the active admin boundary or explicitly enabled
       const isVisible =
-        (layers.boundaries && b.adminLevel === activeAdminLevel) ||
+        isBoundaryLevelVisible(b.adminLevel) ||
         (layers.constituencies && b.adminLevel === 2) ||
         (layers.wards && b.adminLevel === 3);
       if (!isVisible) return;
@@ -5280,7 +5417,10 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
         const normFName = normalizeName(fName);
 
         if (b.adminLevel === 1) {
-          if (!isNationalAdminOrManager && userScopedProvinceIds.size > 0) {
+          if (userJurisdictionLevel === "district" || userJurisdictionLevel === "facility") {
+            return false;
+          }
+          if (userJurisdictionLevel === "provincial" || (!isNationalAdminOrManager && userScopedProvinceIds.size > 0)) {
             const localProv = provinceNameLookup.get(normFName);
             if (localProv) {
               return userScopedProvinceIds.has(Number(localProv.id));
@@ -5291,13 +5431,28 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
           }
           return true;
         } else if (b.adminLevel === 2) {
-          if (!isNationalAdminOrManager && userScopedDistrictIds.size > 0) {
-            const localDist = districtNameLookup.get(normFName);
-            if (localDist) {
-              return userScopedDistrictIds.has(Number(localDist.id));
+          if (userJurisdictionLevel === "district" || userJurisdictionLevel === "facility") {
+            if (userScopedDistrictIds.size > 0) {
+              const localDist = districtNameLookup.get(normFName);
+              if (localDist) {
+                return userScopedDistrictIds.has(Number(localDist.id));
+              }
+              const distId = feature.properties?.districtId || feature.properties?.id;
+              if (distId && userScopedDistrictIds.has(Number(distId))) return true;
+              return false;
             }
-            const distId = feature.properties?.districtId || feature.properties?.id;
-            if (distId && userScopedDistrictIds.has(Number(distId))) return true;
+          }
+          if (userJurisdictionLevel === "provincial" && userScopedProvinceIds.size > 0) {
+            const localDist = districtNameLookup.get(normFName);
+            if (localDist && localDist.provinceId) {
+              return userScopedProvinceIds.has(Number(localDist.provinceId));
+            }
+            const provProp = feature.properties?.province || feature.properties?.PROVINCE || feature.properties?.NAME_1 || "";
+            const normProvProp = normalizeName(provProp);
+            if (normProvProp) {
+              const p = provinceNameLookup.get(normProvProp);
+              if (p) return userScopedProvinceIds.has(Number(p.id));
+            }
             return false;
           }
           if (selectedProvinceId === "all") {
@@ -5423,6 +5578,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
     isNationalAdminOrManager,
     userScopedDistrictIds,
     userScopedProvinceIds,
+    userJurisdictionLevel,
   ]);
 
   // ─── GRID3 selection-aware emphasis ──────────────────────────────────────

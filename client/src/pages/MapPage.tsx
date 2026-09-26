@@ -61,8 +61,10 @@ export default function MapPage() {
     gcTime: 60 * 60 * 1000,
   });
 
+  const { user } = useAuth();
+
   const { data: facilities } = useQuery<Facility[]>({
-    queryKey: ["/api/facilities", "tenant", activeTenantInfo?.id],
+    queryKey: ["/api/facilities", "tenant", activeTenantInfo?.id, "with-neighbors"],
     queryFn: async () => {
       if (!navigator.onLine) {
         const _tid = loadActiveTenant()?.id;
@@ -70,7 +72,7 @@ export default function MapPage() {
           ? offlineDb.facilities.where("tenantId").equals(_tid).toArray()
           : offlineDb.facilities.toArray()) as any;
       }
-      const res = await fetch("/api/facilities", { credentials: "include" });
+      const res = await fetch("/api/facilities?includeNeighbors=true", { credentials: "include" });
       if (!res.ok) return [];
       return res.json();
     },
@@ -120,6 +122,17 @@ export default function MapPage() {
   );
 
   const { center, zoom } = useMemo(() => {
+    // If logged in as HF user, center directly on their assigned facility
+    if (user?.facilityId) {
+      const ownFac = scopedFacilities.find((f) => Number(f.id) === Number(user.facilityId));
+      if (ownFac && ownFac.latitude != null && ownFac.longitude != null && !isNaN(Number(ownFac.latitude)) && !isNaN(Number(ownFac.longitude))) {
+        return {
+          center: [Number(ownFac.latitude), Number(ownFac.longitude)] as [number, number],
+          zoom: 12,
+        };
+      }
+    }
+
     const facilityCoords = scopedFacilities.filter(
       (f) => f.latitude !== null && f.longitude !== null && !isNaN(Number(f.latitude)) && !isNaN(Number(f.longitude))
     );
@@ -139,7 +152,7 @@ export default function MapPage() {
     }
 
     return { center: calculatedCenter, zoom: calculatedZoom };
-  }, [isOnline, scopedFacilities, tenantCenter, tenantZoom]);
+  }, [user, isOnline, scopedFacilities, tenantCenter, tenantZoom]);
 
   return (
     <div className="h-full">
